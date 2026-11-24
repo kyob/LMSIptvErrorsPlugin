@@ -10,12 +10,15 @@
 
 /* Tabele: klasy LMS (table table-striped table-hover) + kontener przewijany poziomo */
 .iptv-tbl-wrap { overflow-x: auto; margin-bottom: 14px; }
-.iptv-tbl { width: 100%; margin-bottom: 0; border: 1px solid #cfc4a8; border-radius: 6px; background: #fbf8f1; }
-.iptv-tbl th { background: #6b5d3a; color: #fff; padding: 7px 10px; font-size: 13px; text-align: left; white-space: nowrap; }
-.iptv-tbl td { padding: 6px 10px; vertical-align: middle; }
-.iptv-tbl .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.iptv-tbl { width: 100%; margin-bottom: 0; border: 1px solid #cfc4a8; border-radius: 6px; background: #fbf8f1; border-collapse: collapse; }
+.iptv-tbl th { background: #6b5d3a; color: #fff; padding: 7px 10px; font-size: 13px; text-align: left; white-space: nowrap; border-bottom: 2px solid #544c2e; }
+.iptv-tbl td { padding: 6px 10px; vertical-align: middle; border-bottom: 1px solid #ddd2ba; }
+.iptv-tbl tbody tr:last-child td { border-bottom: none; }
+.iptv-tbl.table-striped tbody tr:nth-child(even), .iptv-tbl tbody tr:nth-child(even) { background: rgba(107, 93, 58, .06); }
 .iptv-tbl tbody tr.iptv-row-hi { background: #fde7ea; }
 .iptv-tbl tbody tr.iptv-row-warn { background: #fff3cd; }
+.iptv-tbl .lp { text-align: right; color: #6b6b6b; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.iptv-tbl .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .iptv-empty { text-align: center; color: #6b6b6b; padding: 14px; }
 
 /* Pasek proporcji */

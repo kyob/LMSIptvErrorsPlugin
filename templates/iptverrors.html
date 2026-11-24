@@ -145,12 +145,13 @@
             <div class="iptv-tbl-wrap">
             <table class="table table-striped table-hover iptv-tbl" id="iptv-emg">
                 <thead><tr>
-                    <th scope="col">MAC</th><th scope="col">IP</th><th scope="col">{trans('Model')}</th><th scope="col">{trans('Serial')}</th><th scope="col">{trans('Podsieć')}</th>
+                    <th scope="col" class="lp">Lp.</th><th scope="col">MAC</th><th scope="col">IP</th><th scope="col">{trans('Model')}</th><th scope="col">{trans('Serial')}</th><th scope="col">{trans('Podsieć')}</th>
                     <th scope="col" class="n">{trans('Błędy (max)')}</th><th scope="col">{trans('Klient')}</th><th scope="col">{trans('Nr SMS')}</th>
                 </tr></thead>
                 <tbody>
                 {foreach $iptv.emergency_candidates as $d}
                     <tr class="{if $d.errors > 0}iptv-row-warn{/if}" data-n="{$d.errors}" data-s="{$d.search|escape}">
+                        <td class="lp">{$d@iteration}</td>
                         <td><code>{$d.mac|escape}</code> <button type="button" class="iptv-copy lms-ui-button lms-ui-button-secondary" data-copy="{$d.mac|escape}" data-copy-label="{trans('Kopiuj MAC')|escape}" title="{trans('Kopiuj MAC')}" aria-label="{trans('Kopiuj MAC')}"><i class="fas fa-copy"></i></button></td>
                         <td><code>{$d.ip|escape}</code></td>
                         <td>{$d.model|escape}{if $d.broken} <span class="iptv-badge" title="{trans('Oznaczony w SMS jako uszkodzony')}">!</span>{/if}</td>
@@ -161,7 +162,7 @@
                         <td>{if $d.sms_number}{$d.sms_number|escape}{else}<span class="iptv-zero">—</span>{/if}</td>
                     </tr>
                 {foreachelse}
-                    <tr><td colspan="8" class="iptv-empty">{trans('Brak dekoderów w stanie awaryjnym.')}</td></tr>
+                    <tr><td colspan="9" class="iptv-empty">{trans('Brak dekoderów w stanie awaryjnym.')}</td></tr>
                 {/foreach}
                 </tbody>
             </table>
@@ -215,12 +216,13 @@
         <div class="iptv-tbl-wrap">
         <table class="table table-striped table-hover iptv-tbl" id="iptv-devices">
             <thead><tr>
-                <th scope="col">MAC</th><th scope="col">IP</th><th scope="col">{trans('Model')}</th><th scope="col">{trans('Serial')}</th><th scope="col">{trans('Podsieć')}</th>
+                <th scope="col" class="lp">Lp.</th><th scope="col">MAC</th><th scope="col">IP</th><th scope="col">{trans('Model')}</th><th scope="col">{trans('Serial')}</th><th scope="col">{trans('Podsieć')}</th>
                 <th scope="col" class="n">{trans('Błędy (max)')}</th><th scope="col" class="n">{trans('Zdarzeń')}</th><th scope="col">{trans('Grupy multicast')}</th><th scope="col">{trans('Ostatnio')}</th><th scope="col">{trans('Klient')}</th><th scope="col">{trans('Nr SMS')}</th>
             </tr></thead>
             <tbody>
             {foreach $iptv.devices as $d}
                 <tr class="{if $d.errors >= 20}iptv-row-hi{elseif $d.errors >= 10}iptv-row-warn{/if}" data-n="{$d.errors}" data-s="{$d.search|escape}">
+                    <td class="lp">{$d@iteration}</td>
                     <td><code>{$d.mac|escape}</code> <button type="button" class="iptv-copy lms-ui-button lms-ui-button-secondary" data-copy="{$d.mac|escape}" data-copy-label="{trans('Kopiuj MAC')|escape}" title="{trans('Kopiuj MAC')}" aria-label="{trans('Kopiuj MAC')}"><i class="fas fa-copy"></i></button></td>
                     <td><code>{$d.ip|escape}</code></td>
                     <td>{$d.model|escape}{if $d.broken} <span class="iptv-badge" title="{trans('Oznaczony w SMS jako uszkodzony')}">!</span>{/if}</td>
@@ -234,7 +236,7 @@
                     <td>{if $d.sms_number}{$d.sms_number|escape}{else}<span class="iptv-zero">—</span>{/if}</td>
                 </tr>
             {foreachelse}
-                <tr><td colspan="11" class="iptv-empty">{trans('Brak dekoderów z błędami.')}</td></tr>
+                <tr><td colspan="12" class="iptv-empty">{trans('Brak dekoderów z błędami.')}</td></tr>
             {/foreach}
             </tbody>
         </table>
