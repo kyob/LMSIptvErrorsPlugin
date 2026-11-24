@@ -142,7 +142,7 @@ ls -lZ /var/www/html/lmsplus/storage/iptv-errors
 ```bash
 /usr/sbin/restorecon -Rv /var/www/html/lmsplus/storage/iptv-errors
 ```
-Oczekiwany wynik: linie `Relabeled … to … httpd_sys_rw_content_t`. Po tym kroku błąd znika (potwierdzone na `serwer produkcyjny`).
+Oczekiwany wynik: linie `Relabeled … to … httpd_sys_rw_content_t`. Po tym kroku błąd znika (potwierdzone na serwerze produkcyjnym).
 3. Jeśli `restorecon` niczego nie zmienia, w systemie brakuje reguły dla `storage/`. Dodaj ją trwale i powtórz krok 2:
 ```bash
 /usr/sbin/semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/html/lmsplus/storage/iptv-errors(/.*)?"
@@ -166,3 +166,7 @@ Po każdej ręcznej zmianie w `storage/iptv-errors` uruchom `restorecon -Rv` na 
 | Żółty komunikat „Ostatnia migawka historii jest sprzed N min" | sprawdź `lms-plugin-iptv-errors-collect.timer` |
 | „Syntax error in template … Unexpected ?" | w szablonach Smarty nie używaj operatora `? :`, użyj `{if}{else}` |
 | Wpis menu w Sieci IP zamiast TV | włącz `LMSJamboxPlugin` |
+
+## Licencja
+
+GPL-2.0-only — tak jak LMS-PLUS. Pełny tekst w pliku [LICENSE](LICENSE). Historia zmian w [CHANGELOG.md](CHANGELOG.md).
