@@ -388,7 +388,7 @@ if ($data !== null) {
     });
 
     // Helper: klienci LMS po numerach klienta z SMS (customers.tv_cust_number).
-    // SEC: bind IN (?) zamiast konkatenacji. PERF: wyniki cache'owane w obrębie requestu —
+    // SEC: bind IN ? zamiast konkatenacji. PERF: wyniki cache'owane w obrębie requestu —
     // ten sam numer nie jest pytany drugi raz (dekodery + kandydaci awarii).
     $cust_by_number_cache = array();
     $customers_by_numbers = function (array $numbers) use ($DB, &$cust_by_number_cache) {
@@ -402,7 +402,7 @@ if ($data !== null) {
             }
         }
         if ($missing) {
-            foreach ($DB->GetAll("SELECT id, tv_cust_number, lastname, name FROM customers WHERE deleted = 0 AND tv_cust_number IN (?)", array($missing)) ?: array() as $r) {
+            foreach ($DB->GetAll("SELECT id, tv_cust_number, lastname, name FROM customers WHERE deleted = 0 AND tv_cust_number IN ?", array($missing)) ?: array() as $r) {
                 $cust_by_number_cache[$r['tv_cust_number']] = array('id' => $r['id'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
             }
             foreach ($missing as $n) {
@@ -462,7 +462,7 @@ if ($data !== null) {
         }
 
         // Klient w LMS: najpierw po MAC, potem po IP (dekodery IPTV zwykle nie są w LMS, więc to dopasowanie bywa puste).
-        // SEC: zero konkatenacji danych z zewnątrz — bindy IN (?).
+        // SEC: zero konkatenacji danych z zewnątrz — bindy IN ?.
         $owner_by_mac = array();
         $owner_by_ip = array();
         $macs_ok = array_values(array_filter(array_keys($by_mac), function ($x) {
@@ -471,7 +471,7 @@ if ($data !== null) {
         if ($macs_ok) {
             foreach ($DB->GetAll("SELECT lower(x.mac) AS mac, n.ownerid, c.lastname, c.name
                 FROM macs x JOIN nodes n ON n.id = x.nodeid JOIN customers c ON c.id = n.ownerid
-                WHERE n.ownerid IS NOT NULL AND lower(x.mac) IN (?)", array($macs_ok)) ?: array() as $r) {
+                WHERE n.ownerid IS NOT NULL AND lower(x.mac) IN ?", array($macs_ok)) ?: array() as $r) {
                 $owner_by_mac[$r['mac']] = array('id' => $r['ownerid'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
             }
         }
@@ -485,7 +485,7 @@ if ($data !== null) {
         if ($ips_long) {
             foreach ($DB->GetAll("SELECT n.ipaddr, n.ownerid, c.lastname, c.name
                 FROM nodes n JOIN customers c ON c.id = n.ownerid
-                WHERE n.ownerid IS NOT NULL AND n.ipaddr IN (?)", array(array_map('intval', array_keys($ips_long)))) ?: array() as $r) {
+                WHERE n.ownerid IS NOT NULL AND n.ipaddr IN ?", array(array_map('intval', array_keys($ips_long)))) ?: array() as $r) {
                 $owner_by_ip[(int) $r['ipaddr']] = array('id' => $r['ownerid'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
             }
         }
