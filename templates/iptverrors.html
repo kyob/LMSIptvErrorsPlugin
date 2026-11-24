@@ -1,0 +1,400 @@
+{extends file="layout.html"}
+{block name=title}::: LMS :{$layout.pagetitle|striphtml} :::{/block}
+{block name=module_content}
+
+<style>
+    .iptv-cards { display:flex; flex-wrap:wrap; gap:10px; margin:6px 0 12px; }
+    .iptv-card { flex:1 1 170px; border:1px solid #b9ae98; background:#f7f2e8; padding:8px 12px; border-radius:4px; }
+    .iptv-card .v { font-size:26px; font-weight:bold; line-height:1.2; }
+    .iptv-card .l { font-size:12px; color:#555; }
+    .iptv-card.bad { border-color:#b00020; background:#fde7ea; }
+    .iptv-card.bad .v { color:#b00020; }
+    .iptv-card.good .v { color:#1b7a3a; }
+    .iptv-ins { margin:0 0 12px; padding:0; list-style:none; }
+    .iptv-ins li { padding:5px 10px; margin-bottom:4px; border-left:4px solid #888; background:#f7f2e8; }
+    .iptv-ins li.bad { border-color:#b00020; background:#fde7ea; }
+    .iptv-ins li.warn { border-color:#e0a800; background:#fff3cd; }
+    .iptv-ins li.ok { border-color:#1b7a3a; background:#e6f4ea; }
+    .iptv-ins li.info { border-color:#3b6fb6; background:#e8f0fb; }
+    .iptv-tbl { width:100%; border-collapse:collapse; margin-bottom:14px; }
+    .iptv-tbl th { text-align:left; padding:4px 8px; background:#d9cdb2; position:sticky; top:0; }
+    .iptv-tbl td { padding:3px 8px; border-bottom:1px solid #d8cfba; vertical-align:middle; }
+    .iptv-tbl .n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .iptv-bar { height:10px; background:#3b6fb6; border-radius:2px; min-width:1px; }
+    .iptv-bar.hi { background:#b00020; }
+    .iptv-bar.mid { background:#e0a800; }
+    .iptv-badge { display:inline-block; padding:0 6px; border-radius:8px; background:#b00020; color:#fff; font-size:12px; }
+    .iptv-up { color:#b00020; font-weight:bold; }
+    .iptv-down { color:#1b7a3a; font-weight:bold; }
+    .iptv-zero { color:#999; }
+    .iptv-bar-wrap { width:140px; }
+    .iptv-tools { margin:6px 0 10px; display:flex; flex-wrap:wrap; gap:14px; align-items:center; }
+    .iptv-h { margin:14px 0 4px; font-weight:bold; font-size:15px; }
+    .iptv-csv { font-size:12px; font-weight:normal; margin-left:6px; }
+    .iptv-muted { color:#666; font-size:12px; }
+    .iptv-hero { display:flex; flex-wrap:wrap; gap:14px; align-items:stretch; margin:8px 0 14px; }
+    .iptv-status { flex:2 1 420px; display:flex; align-items:center; gap:16px; padding:16px 20px; border-radius:8px; color:#fff; background:#6b6b6b; box-shadow:0 1px 3px rgba(0,0,0,.25); }
+    .iptv-status .ic { font-size:44px; line-height:1; }
+    .iptv-status .t { font-size:24px; font-weight:bold; line-height:1.2; }
+    .iptv-status .s { font-size:13px; opacity:.92; margin-top:3px; }
+    .iptv-status.green { background:#1b7a3a; }
+    .iptv-status.yellow { background:#c58a00; }
+    .iptv-status.red { background:#b00020; }
+    .iptv-status.gray { background:#6b6b6b; }
+    .iptv-tiles { flex:3 1 520px; display:flex; flex-wrap:wrap; gap:12px; }
+    .iptv-tile { flex:1 1 130px; padding:12px 14px; border-radius:8px; background:#fbf8f1; border:1px solid #cfc4a8; border-top:5px solid #1b7a3a; box-shadow:0 1px 2px rgba(0,0,0,.12); }
+    .iptv-tile .v { font-size:34px; font-weight:bold; line-height:1.1; color:#1b7a3a; }
+    .iptv-tile .l { font-size:12px; color:#555; margin-top:2px; }
+    .iptv-tile.warn { border-top-color:#c58a00; } .iptv-tile.warn .v { color:#a06f00; }
+    .iptv-tile.bad { border-top-color:#b00020; background:#fde7ea; } .iptv-tile.bad .v { color:#b00020; }
+    .iptv-tile svg { display:block; margin-top:4px; }
+    .iptv-alerts { display:flex; flex-direction:column; gap:8px; margin:0 0 16px; }
+    .iptv-alert { display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:6px; border-left:8px solid #3b6fb6; background:#e8f0fb; box-shadow:0 1px 2px rgba(0,0,0,.12); }
+    .iptv-alert .ic { font-size:22px; width:28px; text-align:center; color:#3b6fb6; }
+    .iptv-alert .tx { flex:1; font-size:14px; }
+    .iptv-alert.warn { border-color:#c58a00; background:#fff3cd; } .iptv-alert.warn .ic { color:#c58a00; }
+    .iptv-alert.bad { border-color:#b00020; background:#fde7ea; } .iptv-alert.bad .ic { color:#b00020; }
+    .iptv-alert a.go { white-space:nowrap; padding:4px 12px; border-radius:14px; background:#fff; border:1px solid #b9ae98; font-weight:bold; }
+    .iptv-ok { padding:14px 18px; border-radius:6px; border-left:8px solid #1b7a3a; background:#e6f4ea; color:#1b7a3a; font-size:16px; font-weight:bold; margin:0 0 16px; }
+    .iptv-nav { display:flex; flex-wrap:wrap; gap:10px; margin:6px 0 14px; }
+    .iptv-nav a { flex:1 1 150px; display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:8px; background:#fbf8f1; border:1px solid #cfc4a8; box-shadow:0 1px 2px rgba(0,0,0,.12); text-decoration:none; color:#222; }
+    .iptv-nav a:hover { background:#fff; border-color:#8a7d5c; }
+    .iptv-nav .ic { font-size:22px; color:#6b5d3a; width:26px; text-align:center; }
+    .iptv-nav .nm { font-weight:bold; line-height:1.2; }
+    .iptv-nav .ct { font-size:12px; color:#666; }
+    .iptv-nav .pill { margin-left:auto; padding:1px 9px; border-radius:10px; color:#fff; font-size:12px; font-weight:bold; background:#c58a00; }
+    .iptv-nav .pill.bad { background:#b00020; }
+    .iptv-tabs { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:6px; padding:8px 0; margin:0 0 10px; background:#e9e0d1; border-bottom:2px solid #cfc4a8; }
+    .iptv-tabs a { display:flex; align-items:center; gap:8px; padding:7px 14px; border-radius:6px; background:#fbf8f1; border:1px solid #cfc4a8; color:#222; text-decoration:none; font-weight:bold; }
+    .iptv-tabs a:hover { background:#fff; border-color:#8a7d5c; }
+    .iptv-tabs a.on { background:#6b5d3a; border-color:#6b5d3a; color:#fff; }
+    .iptv-tabs a .pill { padding:0 8px; border-radius:10px; color:#fff; font-size:12px; background:#c58a00; }
+    .iptv-tabs a .pill.bad { background:#b00020; }
+    .iptv-tbl { border:1px solid #cfc4a8; border-radius:6px; overflow:hidden; background:#fbf8f1; }
+    .iptv-tbl th { background:#6b5d3a; color:#fff; padding:7px 10px; font-size:13px; }
+    .iptv-tbl td { padding:6px 10px; }
+    .iptv-tbl tbody tr:nth-child(even) { background:#f3ecdc; }
+    .iptv-tbl tbody tr:hover { background:#fff3cd; }
+    .iptv-tbl tbody tr.iptv-row-hi { background:#fde7ea; }
+    .iptv-tbl tbody tr.iptv-row-warn { background:#fff3cd; }
+    .iptv-chip { display:inline-block; min-width:28px; text-align:center; padding:1px 8px; border-radius:10px; font-weight:bold; background:#e3ddcc; color:#444; }
+    .iptv-chip.mid { background:#f3c969; color:#5a4100; }
+    .iptv-chip.hi { background:#b00020; color:#fff; }
+    .iptv-h { margin:6px 0 8px; padding:4px 0 4px 10px; border-left:6px solid #6b5d3a; font-size:18px; }
+    details.iptv-more > summary { cursor:pointer; color:#666; margin:10px 0 6px; }
+</style>
+
+<div class="lms-ui-box">
+    <div class="lms-ui-box-title"><i class="fas fa-tv"></i> {trans('Błędy IPTV')}</div>
+    <div class="lms-ui-box-content">
+
+    {if !$iptv.has_key}
+        <p class="iptv-ins"><strong>{trans('Brak klucza API.')}</strong>
+        {trans('Ustaw zmienną api_key w sekcji iptv-errors: Konfiguracja → Interfejs.')}</p>
+    {else}
+        {if $iptv.error}
+            <ul class="iptv-ins"><li class="bad">
+                {trans('Błąd pobierania danych')}: {$iptv.error|escape}.
+                {if $iptv.has_data}{trans('Pokazuję dane z cache sprzed')} {$iptv.age} s.{/if}
+            </li></ul>
+        {/if}
+
+        {if $iptv.snapshot_age !== null && $iptv.snapshot_age > 900}
+            <ul class="iptv-ins"><li class="warn">
+                {trans('Ostatnia migawka historii jest sprzed')} {($iptv.snapshot_age/60)|string_format:'%d'} {trans('min. Sprawdź timer lms-plugin-iptv-errors-collect.timer. Wykresy i kolumna Δ mogą być nieaktualne.')}
+            </li></ul>
+        {/if}
+
+        {if $iptv.has_data}
+        <div class="iptv-tools">
+            <span class="iptv-muted">
+                {trans('Dane z')}: {$iptv.fetched|date_format:"%Y-%m-%d %H:%M:%S"}
+                {if $iptv.baseline_min !== null}| {trans('zmiana (Δ) względem ok.')} {$iptv.baseline_min} {trans('min temu')}{else}| {trans('Zmiany (Δ) pojawią się po zebraniu historii (ok. 30 min)')}{/if}
+                | {trans('historia')}: {$iptv.history_count} {trans('migawek')}{if $iptv.history_hours} ({$iptv.history_hours} h){/if}
+            </span>
+            <a href="?m=iptverrors&view={$iptv.mode}&refresh=1" class="lms-ui-button lms-ui-button-secondary"><i class="fas fa-rotate"></i> {trans('Odśwież')}</a>
+            <a href="https://sms.sgtsa.pl/" target="_blank" rel="noopener noreferrer" class="lms-ui-button lms-ui-button-secondary"><i class="fas fa-up-right-from-square"></i> {trans('System SMS SGT')}</a>
+            <label><input type="checkbox" id="iptv-auto"> {trans('Auto-odświeżanie co 60 s')}</label>
+            <span {if $iptv.mode == ''}style="display:none"{/if}>
+                <label><input type="checkbox" id="iptv-only" checked> {trans('Tylko z błędami')}</label>
+                <input type="text" id="iptv-q" placeholder="{trans('Filtr: nazwa, podsieć, grupa…')}" size="30" autocomplete="off">
+            </span>
+        </div>
+
+        {if $iptv.mode == ''}
+            <div class="iptv-hero">
+                <div class="iptv-status {$iptv.status}">
+                    <div class="ic"><i class="fas {if $iptv.status == 'green'}fa-circle-check{elseif $iptv.status == 'red'}fa-circle-xmark{elseif $iptv.status == 'yellow'}fa-triangle-exclamation{else}fa-circle-question{/if}"></i></div>
+                    <div>
+                        <div class="t">{$iptv.status_text|escape}</div>
+                        <div class="s">{trans('Suma błędów')}: {$iptv.total_errors}{if $iptv.baseline_ok}, {trans('typowo')} {$iptv.normal.low}–{$iptv.normal.high}{/if}</div>
+                    </div>
+                </div>
+                <div class="iptv-tiles">
+                    <div class="iptv-tile {if $iptv.status == 'red'}bad{elseif $iptv.status == 'yellow'}warn{/if}">
+                        <div class="v">{$iptv.total_errors}{if $iptv.total_errors_delta !== null && $iptv.total_errors_delta != 0} <small class="{if $iptv.total_errors_delta > 0}iptv-up{else}iptv-down{/if}" style="font-size:14px;">{if $iptv.total_errors_delta > 0}▲+{else}▼{/if}{$iptv.total_errors_delta}</small>{/if}</div>
+                        <div class="l">{trans('suma błędów (Δ ok. 1 h)')}</div>
+                        {if $iptv.total_spark}<svg width="120" height="26" viewBox="0 0 96 22" preserveAspectRatio="none"><polyline points="{$iptv.total_spark}" fill="none" stroke="#3b6fb6" stroke-width="1.5"/></svg>{/if}
+                    </div>
+                    <div class="iptv-tile {if $iptv.total_emergency > 0}bad{/if}">
+                        <div class="v">{$iptv.total_emergency}</div>
+                        <div class="l">{trans('dekodery w awarii')}</div>
+                    </div>
+                    <div class="iptv-tile {if $iptv.subnets_alert_count > 0}bad{/if}">
+                        <div class="v">{$iptv.subnets_alert_count}</div>
+                        <div class="l">{trans('podsieci z alarmem')}</div>
+                    </div>
+                    <div class="iptv-tile {if $iptv.streams_alert_count > 0}warn{/if}">
+                        <div class="v">{$iptv.streams_alert_count}</div>
+                        <div class="l">{trans('grupy z alarmem')}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="iptv-h">{trans('Wymaga reakcji')}</div>
+            {if $iptv.alerts}
+                <div class="iptv-alerts">
+                    {foreach $iptv.alerts as $a}
+                        <div class="iptv-alert {$a.level}">
+                            <div class="ic"><i class="fas {if $a.level == 'bad'}fa-circle-exclamation{elseif $a.level == 'warn'}fa-triangle-exclamation{else}fa-circle-info{/if}"></i></div>
+                            <div class="tx">{$a.text|escape}</div>
+                            <a class="go" href="?m=iptverrors&view={$a.view}">{trans('Szczegóły')} →</a>
+                        </div>
+                    {/foreach}
+                </div>
+            {else}
+                <div class="iptv-ok"><i class="fas fa-circle-check"></i> {trans('Nic do zrobienia.')}</div>
+            {/if}
+
+            <div class="iptv-h">{trans('Szczegóły')}</div>
+            <div class="iptv-nav">
+                <a href="?m=iptverrors&view=subnets"><span class="ic"><i class="fas fa-network-wired"></i></span><span><div class="nm">{trans('Podsieci')}</div><div class="ct">{$iptv.subnets_with_errors} / {$iptv.subnets_total} {trans('z błędami')}</div></span>{if $iptv.subnets_alert_count > 0}<span class="pill bad">{$iptv.subnets_alert_count}</span>{/if}</a>
+                <a href="?m=iptverrors&view=devices"><span class="ic"><i class="fas fa-tv"></i></span><span><div class="nm">{trans('Dekodery')}</div><div class="ct">{$iptv.devices_count} {trans('z błędami')}</div></span>{if $iptv.heavy_devices > 0}<span class="pill">{$iptv.heavy_devices}</span>{/if}</a>
+                <a href="?m=iptverrors&view=streams"><span class="ic"><i class="fas fa-tower-broadcast"></i></span><span><div class="nm">{trans('Grupy multicast')}</div><div class="ct">{$iptv.streams_with_errors} / {$iptv.streams_total} {trans('z błędami')}</div></span>{if $iptv.streams_alert_count > 0}<span class="pill">{$iptv.streams_alert_count}</span>{/if}</a>
+                <a href="?m=iptverrors&view=models"><span class="ic"><i class="fas fa-microchip"></i></span><span><div class="nm">{trans('Modele')}</div><div class="ct">{count($iptv.models)} {trans('modeli')}</div></span></a>
+                <a href="?m=iptverrors&view=emg"><span class="ic"><i class="fas fa-triangle-exclamation"></i></span><span><div class="nm">{trans('Awarie')}</div><div class="ct">{trans('kandydaci')}: {count($iptv.emergency_candidates)}</div></span>{if $iptv.total_emergency > 0}<span class="pill bad">{$iptv.total_emergency}</span>{/if}</a>
+            </div>
+
+            {if $iptv.insights || $iptv.hints}
+                <details class="iptv-more">
+                    <summary>{trans('Opisowe wnioski i podpowiedzi (bez progów alarmowych)')}</summary>
+                    {if $iptv.insights}
+                        <ul class="iptv-ins">
+                            {foreach $iptv.insights as $i}<li class="{$i[0]}">{$i[1]|escape}</li>{/foreach}
+                        </ul>
+                    {/if}
+                    {if $iptv.hints}
+                        <ul class="iptv-ins">
+                            {foreach $iptv.hints as $h}<li class="info">{$h|escape}</li>{/foreach}
+                        </ul>
+                    {/if}
+                </details>
+            {/if}
+        {else}
+            <div class="iptv-tabs">
+                <a href="?m=iptverrors"><i class="fas fa-gauge-high"></i> {trans('Podsumowanie')}</a>
+                <a href="?m=iptverrors&view=subnets" class="{if $iptv.mode == 'subnets'}on{/if}"><i class="fas fa-network-wired"></i> {trans('Podsieci')}{if $iptv.subnets_alert_count > 0} <span class="pill bad">{$iptv.subnets_alert_count}</span>{/if}</a>
+                <a href="?m=iptverrors&view=devices" class="{if $iptv.mode == 'devices'}on{/if}"><i class="fas fa-tv"></i> {trans('Dekodery')}{if $iptv.heavy_devices > 0} <span class="pill">{$iptv.heavy_devices}</span>{/if}</a>
+                <a href="?m=iptverrors&view=streams" class="{if $iptv.mode == 'streams'}on{/if}"><i class="fas fa-tower-broadcast"></i> {trans('Grupy multicast')}{if $iptv.streams_alert_count > 0} <span class="pill">{$iptv.streams_alert_count}</span>{/if}</a>
+                <a href="?m=iptverrors&view=models" class="{if $iptv.mode == 'models'}on{/if}"><i class="fas fa-microchip"></i> {trans('Modele')}</a>
+                <a href="?m=iptverrors&view=emg" class="{if $iptv.mode == 'emg'}on{/if}"><i class="fas fa-triangle-exclamation"></i> {trans('Awarie')}{if $iptv.total_emergency > 0} <span class="pill bad">{$iptv.total_emergency}</span>{/if}</a>
+            </div>
+        {/if}
+
+        {if $iptv.mode == 'emg'}
+        {if $iptv.emergency_candidates}
+            <div class="iptv-h">{trans('Dekoder w stanie awaryjnym: kandydaci')}</div>
+            <p class="iptv-muted" style="margin:0 0 4px;">
+                {trans('API SGT podaje tylko liczbę dekoderów w stanie awaryjnym (model i podsieć), bez MAC. Poniżej są dekodery z SMS SGT o tym modelu i adresie IP z tej podsieci. Szukany dekoder jest jednym z nich. Najpierw są dekodery z błędami w ostatnich zdarzeniach.')}
+                {trans('Kandydatów')}: {count($iptv.emergency_candidates)}.
+            </p>
+            <table class="iptv-tbl" id="iptv-emg">
+                <thead><tr>
+                    <th>MAC</th><th>IP</th><th>{trans('Model')}</th><th>{trans('Serial')}</th><th>{trans('Podsieć')}</th>
+                    <th class="n">{trans('Błędy (max)')}</th><th>{trans('Klient')}</th><th>{trans('Nr SMS')}</th>
+                </tr></thead>
+                <tbody>
+                {foreach $iptv.emergency_candidates as $d}
+                    <tr class="{if $d.errors > 0}iptv-row-warn{/if}" data-n="1" data-s="{$d.search|escape}">
+                        <td><code>{$d.mac|escape}</code></td>
+                        <td><code>{$d.ip|escape}</code></td>
+                        <td>{$d.model|escape}{if $d.broken} <span class="iptv-badge" title="{trans('Oznaczony w SMS jako uszkodzony')}">!</span>{/if}</td>
+                        <td>{if $d.serial}<a href="https://sms.sgtsa.pl/sms/stock/tracestb/stb/{$d.serial|escape:'url'}" target="_blank" rel="noopener"><code>{$d.serial|escape}</code></a>{/if}</td>
+                        <td>{$d.subnet|escape}</td>
+                        <td class="n">{if $d.errors}<span class="iptv-chip {if $d.errors >= 10}hi{elseif $d.errors >= 3}mid{/if}">{$d.errors}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
+                        <td>{if $d.customer_id}<a href="?m=customerinfo&id={$d.customer_id}">{$d.customer_name|escape}</a>{else}<span class="iptv-zero">—</span>{/if}</td>
+                        <td>{if $d.sms_number}{$d.sms_number|escape}{else}<span class="iptv-zero">—</span>{/if}</td>
+                    </tr>
+                {/foreach}
+                </tbody>
+            </table>
+        {else}
+            <p class="iptv-muted">{trans('Brak dekoderów w stanie awaryjnym.')}</p>
+        {/if}
+        {/if}
+
+        {if $iptv.mode == 'subnets'}
+        <div class="iptv-h">{trans('Podsieci')} <a class="iptv-csv" href="?m=iptverrors&action=csv&t=subnets">CSV</a></div>
+        <table class="iptv-tbl" id="iptv-subnets">
+            <thead><tr>
+                <th>{trans('Nr')}</th><th>{trans('Lokalizacja')}</th><th>{trans('Podsieć')}</th>
+                <th class="n">{trans('Błędy')}</th><th></th><th class="n">{trans('Awaria')}</th><th class="n">Δ</th><th>{trans('24 h')}</th>
+            </tr></thead>
+            <tbody>
+            {foreach $iptv.subnets as $s}
+                <tr data-n="{$s.errors + $s.emergency}" data-s="{($s.num|cat:' '|cat:$s.label|cat:' '|cat:$s.cidr|cat:'')|lower|escape}">
+                    <td>{$s.num|escape}</td>
+                    <td>{$s.label|escape}</td>
+                    <td><code>{$s.cidr|escape}</code></td>
+                    <td class="n"><span class="iptv-chip {if $s.errors >= 20}hi{elseif $s.errors >= 8}mid{/if}">{$s.errors}</span></td>
+                    <td class="iptv-bar-wrap"><div class="iptv-bar {if $s.errors*3 >= $iptv.max_subnet*2}hi{elseif $s.errors*3 >= $iptv.max_subnet}mid{/if}" style="width:{($s.errors*100/$iptv.max_subnet)|string_format:'%d'}%"></div></td>
+                    <td class="n">{if $s.emergency > 0}<span class="iptv-badge">{$s.emergency}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
+                    <td class="n">{if $s.delta === null}<span class="iptv-zero">—</span>{elseif $s.delta > 0}<span class="iptv-up">▲+{$s.delta}</span>{elseif $s.delta < 0}<span class="iptv-down">▼{$s.delta}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
+                    <td>{if $s.spark}<svg width="96" height="22" viewBox="0 0 96 22"><polyline points="{$s.spark}" fill="none" stroke="#3b6fb6" stroke-width="1.5"/></svg>{/if}</td>
+                </tr>
+            {/foreach}
+            </tbody>
+        </table>
+
+        {/if}
+
+        {if $iptv.mode == 'devices'}
+        <div class="iptv-h">{trans('Dekodery z błędami (ostatnie zdarzenia)')} <a class="iptv-csv" href="?m=iptverrors&action=csv&t=devices">CSV</a></div>
+        <p class="iptv-muted" style="margin:0 0 4px;">
+            {trans('API podaje ostatnie')} {$iptv.devices_events} {trans('zdarzeń, czyli')} {$iptv.devices_count} {trans('różnych dekoderów. Dekoderów z błędami jest')} {$iptv.total_errors}{if $iptv.devices_count < $iptv.total_errors}, {trans('lista nie obejmuje wszystkich')}{/if}.
+            {if $iptv.sms_available}
+                {trans('Dekodery znalezione w SMS SGT')}: {$iptv.devices_in_sms} / {$iptv.devices_count}.
+                {trans('Klientów z błędami')}: {$iptv.customers_count}.
+                {trans('Dopasowano do klientów LMS')}: {$iptv.devices_matched} / {$iptv.devices_count}.
+                {if $iptv.sms_error}<span style="color:#b00020;">SMS: {$iptv.sms_error|escape}</span>{/if}
+            {else}
+                {trans('Brak wtyczki Jambox: dopasowanie do klientów tylko po MAC z LMS.')} {trans('Dopasowano do klientów LMS')}: {$iptv.devices_matched} / {$iptv.devices_count}.
+            {/if}
+            {if $iptv.devices_error}<span style="color:#b00020;">{$iptv.devices_error|escape}</span>{/if}
+        </p>
+        <table class="iptv-tbl" id="iptv-devices">
+            <thead><tr>
+                <th>MAC</th><th>IP</th><th>{trans('Model')}</th><th>{trans('Serial')}</th><th>{trans('Podsieć')}</th>
+                <th class="n">{trans('Błędy (max)')}</th><th class="n">{trans('Zdarzeń')}</th><th>{trans('Grupy multicast')}</th><th>{trans('Ostatnio')}</th><th>{trans('Klient')}</th><th>{trans('Nr SMS')}</th>
+            </tr></thead>
+            <tbody>
+            {foreach $iptv.devices as $d}
+                <tr class="{if $d.errors >= 20}iptv-row-hi{elseif $d.errors >= 10}iptv-row-warn{/if}" data-n="{if $d.anomaly}{$d.errors+1}{else}{$d.errors}{/if}" data-s="{$d.search|escape}">
+                    <td><code>{$d.mac|escape}</code></td>
+                    <td><code>{$d.ip|escape}</code></td>
+                    <td>{$d.model|escape}{if $d.broken} <span class="iptv-badge" title="{trans('Oznaczony w SMS jako uszkodzony')}">!</span>{/if}</td>
+                    <td>{if $d.serial}<a href="https://sms.sgtsa.pl/sms/stock/tracestb/stb/{$d.serial|escape:'url'}" target="_blank" rel="noopener"><code>{$d.serial|escape}</code></a>{/if}</td>
+                    <td>{$d.subnet|escape}</td>
+                    <td class="n"><span class="iptv-chip {if $d.errors >= 10}hi{elseif $d.errors >= 3}mid{/if}">{$d.errors}</span>{if $d.anomaly} <span class="iptv-badge" title="{trans('Wartość odstająca z API SGT (powyżej 1000), nie liczona jako błędy')}: {$d.anomaly}">{trans('odstająca')}</span>{/if}</td>
+                    <td class="n">{$d.events}</td>
+                    <td>{foreach $d.groups as $g}<code>{$g|escape}</code>{if !$g@last}, {/if}{/foreach}{if $d.groups_n >= 5} <span class="iptv-badge" title="{trans('Błędy w wielu grupach naraz')}">{$d.groups_n}</span>{/if}</td>
+                    <td>{if $d.ts}{$d.ts|date_format:"%H:%M:%S"}{/if}</td>
+                    <td>{if $d.customer_id}<a href="?m=customerinfo&id={$d.customer_id}">{$d.customer_name|escape}</a>{else}<span class="iptv-zero">—</span>{/if}</td>
+                    <td>{if $d.sms_number}{$d.sms_number|escape}{else}<span class="iptv-zero">—</span>{/if}</td>
+                </tr>
+            {/foreach}
+            </tbody>
+        </table>
+
+        {/if}
+
+        {if $iptv.mode == 'streams'}
+        <div class="iptv-h">{trans('Grupy multicast (strumienie)')} <a class="iptv-csv" href="?m=iptverrors&action=csv&t=streams">CSV</a>
+            <button type="button" id="iptv-more" class="lms-ui-button lms-ui-button-secondary" style="margin-left:10px;"></button></div>
+        <table class="iptv-tbl" id="iptv-streams">
+            <thead><tr>
+                <th>{trans('Grupa')}</th><th class="n">{trans('Błędy')}</th><th></th><th class="n">Δ</th><th>{trans('24 h')}</th>
+            </tr></thead>
+            <tbody>
+            {foreach $iptv.streams as $s}
+                <tr {if $s@iteration > 15}class="iptv-extra"{/if} data-n="{$s.errors}" data-s="{$s.group|lower|escape}">
+                    <td><code>{$s.group|escape}</code></td>
+                    <td class="n"><span class="iptv-chip {if $s.errors >= 20}hi{elseif $s.errors >= 8}mid{/if}">{$s.errors}</span></td>
+                    <td class="iptv-bar-wrap"><div class="iptv-bar {if $s.errors*3 >= $iptv.max_stream*2}hi{elseif $s.errors*3 >= $iptv.max_stream}mid{/if}" style="width:{($s.errors*100/$iptv.max_stream)|string_format:'%d'}%"></div></td>
+                    <td class="n">{if $s.delta === null}<span class="iptv-zero">—</span>{elseif $s.delta > 0}<span class="iptv-up">▲+{$s.delta}</span>{elseif $s.delta < 0}<span class="iptv-down">▼{$s.delta}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
+                    <td>{if $s.spark}<svg width="96" height="22" viewBox="0 0 96 22"><polyline points="{$s.spark}" fill="none" stroke="#3b6fb6" stroke-width="1.5"/></svg>{/if}</td>
+                </tr>
+            {/foreach}
+            </tbody>
+        </table>
+
+        {/if}
+
+        {if $iptv.mode == 'models'}
+        <div class="iptv-h">{trans('Modele dekoderów')} <a class="iptv-csv" href="?m=iptverrors&action=csv&t=models">CSV</a></div>
+        <table class="iptv-tbl" id="iptv-models">
+            <thead><tr>
+                <th>{trans('Model')}</th><th class="n">{trans('Błędy')}</th><th>{trans('Udział')}</th><th class="n" title="{trans('Błędy podzielone przez liczbę zarejestrowanych dekoderów tego modelu (SMS SGT)')}">{trans('Stawka')}</th><th></th><th class="n">{trans('Awaria')}</th><th class="n">Δ</th><th>{trans('24 h')}</th>
+            </tr></thead>
+            <tbody>
+            {foreach $iptv.models as $m}
+                <tr data-n="{$m.errors + $m.emergency}" data-s="{$m.name|lower|escape}">
+                    <td>{$m.name|escape}</td>
+                    <td class="n"><strong>{$m.errors}</strong></td>
+                    <td class="n">{$m.share}%</td>
+                    <td class="n">{if $m.rate !== null}{$m.rate}% <span class="iptv-zero">({$m.registered})</span>{else}<span class="iptv-zero">—</span>{/if}</td>
+                    <td class="iptv-bar-wrap"><div class="iptv-bar" style="width:{($m.errors*100/$iptv.max_model)|string_format:'%d'}%"></div></td>
+                    <td class="n">{if $m.emergency > 0}<span class="iptv-badge">{$m.emergency}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
+                    <td class="n">{if $m.delta === null}<span class="iptv-zero">—</span>{elseif $m.delta > 0}<span class="iptv-up">▲+{$m.delta}</span>{elseif $m.delta < 0}<span class="iptv-down">▼{$m.delta}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
+                    <td>{if $m.spark}<svg width="96" height="22" viewBox="0 0 96 22"><polyline points="{$m.spark}" fill="none" stroke="#3b6fb6" stroke-width="1.5"/></svg>{/if}</td>
+                </tr>
+            {/foreach}
+            </tbody>
+        </table>
+
+        {/if}
+
+        <p class="iptv-muted">
+            {trans('Źródło: device-errors-api.sgt.net.pl (portal SGT). Historia i Δ powstają z migawek zapisywanych co 5 min (timer systemd).')}
+        </p>
+
+        <script>
+            (function () {
+                var only = document.getElementById('iptv-only');
+                var q = document.getElementById('iptv-q');
+                var auto = document.getElementById('iptv-auto');
+                var rows = document.querySelectorAll('.iptv-tbl tbody tr');
+                var more = document.getElementById('iptv-more');
+                var extra = document.querySelectorAll('.iptv-extra');
+                var showAll = false;
+
+                function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+                function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+                function apply() {
+                    var term = q.value.trim().toLowerCase();
+                    for (var i = 0; i < rows.length; i++) {
+                        var r = rows[i];
+                        var hide = (only.checked && parseInt(r.getAttribute('data-n'), 10) === 0)
+                            || (term && r.getAttribute('data-s').indexOf(term) === -1)
+                            || (!term && !showAll && r.classList.contains('iptv-extra'));
+                        r.style.display = hide ? 'none' : '';
+                    }
+                    if (more) {
+                        more.style.display = extra.length ? '' : 'none';
+                        more.textContent = showAll ? '{trans('Pokaż tylko 15 największych')}' : '{trans('Pokaż wszystkie')} (' + (extra.length + 15) + ')';
+                    }
+                }
+
+                if (more) { more.addEventListener('click', function () { showAll = !showAll; apply(); }); }
+
+                var o = load('iptv-only');
+                if (o !== null) { only.checked = o === '1'; }
+                auto.checked = load('iptv-auto') === '1';
+                only.addEventListener('change', function () { store('iptv-only', only.checked ? '1' : '0'); apply(); });
+                q.addEventListener('input', apply);
+                auto.addEventListener('change', function () { store('iptv-auto', auto.checked ? '1' : '0'); });
+                apply();
+
+                setInterval(function () {
+                    // Nie odświeżaj, gdy użytkownik pisze w filtrze lub ma w nim tekst (reload skasowałby wpis).
+                    if (auto.checked && q.value === '' && document.activeElement !== q) { window.location.reload(); }
+                }, 60000);
+            })();
+        </script>
+        {/if}
+    {/if}
+    </div>
+</div>
+
+{/block}

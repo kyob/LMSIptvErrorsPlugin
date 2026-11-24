@@ -1,0 +1,12 @@
+[Unit]
+Description=LMS Task: lms-plugin-iptv-errors-collect
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=apache
+WorkingDirectory=/var/www/html/lmsplus/plugins/LMSIptvErrorsPlugin/bin
+ExecStart=/usr/bin/php /var/www/html/lmsplus/plugins/LMSIptvErrorsPlugin/bin/lms-iptv-errors-collect.php -C /etc/lms/lms.ini --quiet
+TimeoutSec=60
+NoNewPrivileges=true
+PrivateTmp=true
