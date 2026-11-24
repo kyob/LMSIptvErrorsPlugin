@@ -26,6 +26,72 @@
         return c ? c.querySelectorAll('.iptv-tbl tbody tr') : [];
     }
 
+    /* Sortowanie klikalne po nagłówkach tabel (.iptv-tbl).
+     * Stan (kolumna:kierunek) w localStorage per tabela — przeżywa auto-odświeżanie. */
+    var LS_SORT = 'iptv-sort-';
+
+    function sortState(table) { return load(LS_SORT + (table.id || 'x')); }
+
+    function cellVal(row, idx) {
+        var td = row.children[idx];
+        return td ? (td.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    }
+
+    function isNum(s) { return s !== '' && !isNaN(Number(s)); }
+
+    function sortRows(table, idx, dir) {
+        var tbody = table.tBodies[0];
+        if (!tbody) { return; }
+        var list = Array.prototype.slice.call(tbody.rows);
+        var data = [];
+        var empty = [];
+        for (var i = 0; i < list.length; i++) {
+            (list[i].classList.contains('iptv-empty') ? empty : data).push(list[i]);
+        }
+        data.sort(function (a, b) {
+            var va = cellVal(a, idx);
+            var vb = cellVal(b, idx);
+            var cmp = (isNum(va) && isNum(vb))
+                ? Number(va) - Number(vb)
+                : va.localeCompare(vb, 'pl');
+            return cmp * dir;
+        });
+        for (var j = 0; j < data.length; j++) { tbody.appendChild(data[j]); }
+        for (var k = 0; k < empty.length; k++) { tbody.appendChild(empty[k]); }
+    }
+
+    function markTh(table, idx, dir) {
+        var head = table.tHead;
+        if (!head || !head.rows[0]) { return; }
+        var ths = head.rows[0].children;
+        for (var i = 0; i < ths.length; i++) {
+            ths[i].classList.remove('iptv-sort-asc', 'iptv-sort-desc');
+            if (i === idx) { ths[i].classList.add(dir > 0 ? 'iptv-sort-asc' : 'iptv-sort-desc'); }
+        }
+    }
+
+    function applySort() {
+        var c = content();
+        var tables = c ? c.querySelectorAll('.iptv-tbl') : [];
+        for (var t = 0; t < tables.length; t++) {
+            var st = sortState(tables[t]);
+            if (!st) { continue; }
+            var parts = st.split(':');
+            var idx = parseInt(parts[0], 10);
+            var dir = parts[1] === 'desc' ? -1 : 1;
+            sortRows(tables[t], idx, dir);
+            markTh(tables[t], idx, dir);
+        }
+    }
+
+    function initSortable() {
+        var c = content();
+        var ths = c ? c.querySelectorAll('.iptv-tbl thead th') : [];
+        for (var i = 0; i < ths.length; i++) {
+            if ((ths[i].textContent || '').trim() !== '') { ths[i].classList.add('iptv-sortable'); }
+        }
+    }
+
     function apply() {
         var q = qInput();
         var only = onlyBox();
@@ -59,6 +125,8 @@
                 ? label('show-top')
                 : label('show-all') + ' (' + list.length + ')';
         }
+
+        applySort();
     }
 
     function syncUrl(v) {
@@ -134,6 +202,7 @@
             if (fresh && cur) {
                 cur.replaceWith(fresh);
                 initPrefs();
+                initSortable();
                 apply();
             }
         }).catch(function () { /* zostawiamy bieżący widok */ });
@@ -154,6 +223,19 @@
 
     document.addEventListener('click', function (e) {
         if (!e.target || !e.target.closest) { return; }
+        var th = e.target.closest('.iptv-tbl thead th.iptv-sortable');
+        if (th) {
+            var table = th.closest('table');
+            var idx = Array.prototype.indexOf.call(th.parentNode.children, th);
+            var st = sortState(table);
+            var cur = st ? st.split(':') : null;
+            var asc = !(cur && parseInt(cur[0], 10) === idx && cur[1] === 'asc');
+            var dir = asc ? 1 : -1;
+            store(LS_SORT + (table.id || 'x'), idx + ':' + (asc ? 'asc' : 'desc'));
+            sortRows(table, idx, dir);
+            markTh(table, idx, dir);
+            return;
+        }
         var more = e.target.closest('#iptv-more');
         if (more) { showAll = !showAll; apply(); return; }
         var cp = e.target.closest('.iptv-copy');
@@ -174,6 +256,7 @@
     });
 
     initPrefs();
+    initSortable();
     apply();
     setInterval(autoRefresh, REFRESH_MS);
 })();
