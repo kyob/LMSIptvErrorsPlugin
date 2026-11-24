@@ -25,6 +25,8 @@ class IptvMetrics
     const HISTORY_KEEP = 288; // awaryjny limit liczby migawek (normalnie mieści się w HISTORY_TTL)
     const HISTORY_TTL = 86400; // retencja historii po czasie: migawki starsze niż 24 h są odrzucane
     const MAX_RESPONSE_BYTES = 1048576; // 1 MB: limit rozmiaru odpowiedzi API
+    const DEVICES_TOP_LIMIT = 100; // ile MAC-ów trafia do pola devices_top jednej migawki
+    const DEVICE_ANOMALY_MAX = 1000; // errors powyżej tej wartości to odstająca, nie błąd (jak w widoku dekoderów)
 
     private $url;
     private $key;
@@ -222,7 +224,7 @@ class IptvMetrics
     /**
      * Jedna normalizacja adresu MAC w całej wtyczce: małe litery, separator ':'.
      */
-    private static function normalizeMac($mac)
+    public static function normalizeMac($mac)
     {
         return strtolower(str_replace('-', ':', trim((string) $mac)));
     }
@@ -369,6 +371,72 @@ class IptvMetrics
     }
 
     /**
+     * Szereg czasowy błędów jednego dekodera z historii migawek:
+     * lista ['t' => timestamp, 'errors' => liczba]. Migawki bez pola 'devices_top'
+     * (stary format) są pomijane — to brak danych, nie zero. Dekoder poza top 100
+     * w danej migawce ma errors = 0.
+     *
+     * @param string $mac adres MAC (dowolny format, patrz normalizeMac)
+     * @param int $hours ile godzin wstecz z historii
+     * @return array lista ['t' => int, 'errors' => int]
+     */
+    public function getDeviceSeries($mac, $hours = 24)
+    {
+        return self::deviceSeriesFromHistory($this->history(), $mac, time(), $hours);
+    }
+
+    /**
+     * To samo co getDeviceSeries(), ale na podanej tablicy historii
+     * (np. świeżo odczytanej w module jednym readJson).
+     *
+     * @return array lista ['t' => int, 'errors' => int]
+     */
+    public static function deviceSeriesFromHistory(array $history, $mac, $now, $hours = 24)
+    {
+        $mac = self::normalizeMac($mac);
+        $cutoff = $now - (int) $hours * 3600;
+        $series = array();
+        foreach ($history as $snap) {
+            $t = (int) ($snap['t'] ?? 0);
+            if ($t < $cutoff) {
+                continue;
+            }
+            $top = $snap['devices_top'] ?? null; // wsteczna kompatybilność: stary format => null
+            if (!is_array($top)) {
+                continue;
+            }
+            $series[] = array('t' => $t, 'errors' => (int) ($top[$mac] ?? 0));
+        }
+        return $series;
+    }
+
+    /**
+     * Top dekoderów wg błędów do migawki: {mac: errors}, najwyżej DEVICES_TOP_LIMIT wpisów.
+     * Per MAC bierzemy max z jego zdarzeń (tak jak widok dekoderów); wartości odstające
+     * (> DEVICE_ANOMALY_MAX) nie liczą się jako błędy. Null, gdy nie mamy żadnych zdarzeń —
+     * migawka zostaje wtedy bez szeregu per-MAC (stary format / awaria endpointu).
+     *
+     * @return array|null
+     */
+    private function buildDevicesTop()
+    {
+        $perMac = array();
+        foreach ((array) ($this->getEvents()['events'] ?? array()) as $e) {
+            $mac = (string) ($e['mac'] ?? '');
+            $errors = (int) ($e['errors'] ?? 0);
+            if ($mac === '' || $errors <= 0 || $errors > self::DEVICE_ANOMALY_MAX) {
+                continue;
+            }
+            $perMac[$mac] = max($perMac[$mac] ?? 0, $errors);
+        }
+        if (!$perMac) {
+            return null;
+        }
+        arsort($perMac);
+        return array_slice($perMac, 0, self::DEVICES_TOP_LIMIT, true);
+    }
+
+    /**
      * Wywołanie z timera: zawsze pobiera dane i dopisuje migawkę (bez sprawdzania cache).
      */
     public function collect()
@@ -408,7 +476,9 @@ class IptvMetrics
         $history = $this->readJson('history.json') ?: array();
         $last = $history ? end($history) : null;
         if ($always || !$last || ($now - (int) $last['t']) >= $this->history_interval) {
-            $history[] = array('t' => $now, 'v' => self::flatten($data));
+            // devices_top: szereg per-MAC (top 100) do timeline dekodera. Migawki sprzed
+            // tego pola (stary format) zostają w historii bez zmian — czytamy je jako null.
+            $history[] = array('t' => $now, 'v' => self::flatten($data), 'devices_top' => $this->buildDevicesTop());
             // Retencja po czasie: migawki starsze niż 24 h odpadają niezależnie od ich liczby.
             $cutoff = $now - self::HISTORY_TTL;
             $history = array_values(array_filter($history, function ($snap) use ($cutoff) {
