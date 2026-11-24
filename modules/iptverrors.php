@@ -6,14 +6,60 @@ require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvAlerts.php';
 const IPTV_BASELINE_MIN_AGE = 1800; // porównanie z migawką starszą niż 30 min, najbliższą 1 h
 const IPTV_BASELINE_TARGET = 3600;
 
+// SEC: akcje ze skutkiem ubocznym (refresh=1, action=csv) tylko na POST z tokenem CSRF.
+// Token = hash_hmac('sha256', session_id() . nazwa_akcji, klucz trzymany w sesji). GET na te akcje dostaje 405.
+$iptv_method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$iptv_action = isset($_POST['action']) ? (string) $_POST['action'] : (isset($_GET['action']) ? (string) $_GET['action'] : '');
+$iptv_table = isset($_POST['t']) ? (string) $_POST['t'] : (isset($_GET['t']) ? (string) $_GET['t'] : '');
+$iptv_refresh = isset($_POST['refresh']) || isset($_GET['refresh']);
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    @session_start();
+}
+if (empty($_SESSION['iptverrors_csrf_key'])) {
+    $_SESSION['iptverrors_csrf_key'] = bin2hex(random_bytes(32));
+}
+$iptv_csrf_token = function ($action) {
+    return hash_hmac('sha256', session_id() . $action, $_SESSION['iptverrors_csrf_key']);
+};
+$iptv_side_actions = array();
+if ($iptv_refresh) {
+    $iptv_side_actions[] = 'refresh';
+}
+if ($iptv_action === 'csv') {
+    $iptv_side_actions[] = 'csv';
+}
+foreach ($iptv_side_actions as $iptv_side) {
+    if ($iptv_method !== 'POST') {
+        header('HTTP/1.1 405 Method Not Allowed');
+        header('Allow: POST');
+        exit('Method Not Allowed');
+    }
+    if (!hash_equals($iptv_csrf_token($iptv_side), (string) ($_POST['iptv_csrf'] ?? ''))) {
+        header('HTTP/1.1 403 Forbidden');
+        exit('Forbidden');
+    }
+}
+// Od tego miejsca refresh=1 i action=csv są zweryfikowane (POST + token).
+$iptv_force = $iptv_refresh;
+
 // Widok: pusty = podsumowanie dla NOC (jeden ekran), reszta to szczegóły.
 $mode = in_array($_GET['view'] ?? '', array('subnets', 'devices', 'streams', 'models', 'emg'), true) ? $_GET['view'] : '';
-// Zapytania do LMS o klientów tylko tam, gdzie tabela z klientami jest pokazywana.
+// Ciężkie bloki (dekodery, kandydaci awarii) tylko tam, gdzie są pokazywane lub eksportowane do CSV.
 $heavy = in_array($mode, array('devices', 'emg'), true)
-    || (($_GET['action'] ?? '') === 'csv' && ($_GET['t'] ?? '') === 'devices');
+    || ($iptv_action === 'csv' && in_array($iptv_table, array('devices', 'emg'), true));
+
+// UX: filtr q (MAC / nazwa / IP / klient) — szablon używa {$iptv.q}, wiersze mają pole search.
+$q = trim((string) ($_GET['q'] ?? $_POST['q'] ?? ''));
+if (mb_strlen($q, 'UTF-8') > 64) {
+    $q = mb_substr($q, 0, 64, 'UTF-8');
+}
+
+// PERF: TTL cache'u ciężkiego bloku = iptv-errors.cache_ttl (ten sam co cache metryk).
+$cache_ttl = (int) ConfigHelper::getConfig('iptv-errors.cache_ttl', 30);
 
 $client = new IptvMetrics();
-$result = $client->hasKey() ? $client->get(isset($_GET['refresh'])) : null;
+$result = $client->hasKey() ? $client->get($iptv_force) : null;
 $data = $result['data'] ?? null;
 
 $now = time();
@@ -63,6 +109,9 @@ $spark = function ($key, $value) use ($history) {
 
 $view = array(
     'mode' => $mode,
+    'q' => $q,
+    // Tokeny CSRF do formularzy POST (refresh / csv) — szablon dokłada hidden input iptv_csrf.
+    'csrf' => array('refresh' => $iptv_csrf_token('refresh'), 'csv' => $iptv_csrf_token('csv')),
     'has_key' => $client->hasKey(),
     'error' => $result['error'] ?? null,
     'stale' => $result['stale'] ?? false,
@@ -79,7 +128,7 @@ if ($data !== null) {
     // Wartość błędów dekodera powyżej progu to odstająca (np. 1919252014 w zdarzeniu SGT). Nie liczymy jej jako błędów.
     $anomaly_min = 1000;
 
-    $stb = $client->getStbRegistry(isset($_GET['refresh']));
+    $stb = $client->getStbRegistry($iptv_force);
     $registered = array();
     foreach ($stb['map'] as $r) {
         $registered[$r['model']] = ($registered[$r['model']] ?? 0) + 1;
@@ -129,6 +178,17 @@ if ($data !== null) {
         array_sum(array_column($subnets, 'emergency'))
     );
 
+    // Modele i podsieci w stanie awaryjnym (kandydaci awarii + alerty).
+    $emg_models = array();
+    foreach ($models as $mo) {
+        if ($mo['emergency'] > 0) {
+            $emg_models[$mo['name']] = true;
+        }
+    }
+    $emg_subnets = array_values(array_filter($subnets, function ($sn) {
+        return $sn['emergency'] > 0;
+    }));
+
     $streams = array();
     foreach ($data['streams'] as $group => $errors) {
         $streams[] = array(
@@ -151,23 +211,23 @@ if ($data !== null) {
         $insights[] = array('ok', trans('Brak dekoderów z błędami.'));
     }
     if ($emergency_total > 0) {
-        $emg_models = array();
+        $emg_models_txt = array();
         foreach ($models as $m) {
             if ($m['emergency'] > 0) {
-                $emg_models[] = $m['name'] . ' (' . $m['emergency'] . ')';
+                $emg_models_txt[] = $m['name'] . ' (' . $m['emergency'] . ')';
             }
         }
-        $emg_subnets = array();
+        $emg_subnets_txt = array();
         foreach ($subnets as $s) {
             if ($s['emergency'] > 0) {
-                $emg_subnets[] = ($s['num'] !== '' ? $s['num'] . ' ' : '') . $s['label'] . ' (' . $s['emergency'] . ')';
+                $emg_subnets_txt[] = ($s['num'] !== '' ? $s['num'] . ' ' : '') . $s['label'] . ' (' . $s['emergency'] . ')';
             }
         }
         $insights[] = array('bad', sprintf(
             trans('Dekodery w stanie awaryjnym: %d. Modele: %s.'),
             $emergency_total,
-            implode(', ', $emg_models)
-        ) . ($emg_subnets ? ' ' . trans('Podsieci') . ': ' . implode(', ', $emg_subnets) . '.' : ''));
+            implode(', ', $emg_models_txt)
+        ) . ($emg_subnets_txt ? ' ' . trans('Podsieci') . ': ' . implode(', ', $emg_subnets_txt) . '.' : ''));
     }
     // Model może dominować tylko dlatego, że jest liczny. Porównujemy stawkę błędów (błędy / zarejestrowane dekodery) ze średnią.
     $dominant_by_size = $models && $data['total_errors'] > 0 && $models[0]['share'] >= 50
@@ -185,8 +245,6 @@ if ($data !== null) {
         ));
     }
     if ($subnet_sum > 0) {
-        $top3 = array_slice(array_column($subnets, 'errors'), 0, 3);
-        rsort($top3);
         $top = $subnets;
         usort($top, function ($a, $b) {
             return $b['errors'] <=> $a['errors'];
@@ -273,215 +331,374 @@ if ($data !== null) {
         $hints[] = trans('Brak wyraźnego wzorca w rozkładzie błędów. Obserwuj kolumnę Δ i wykresy 24 h.');
     }
 
-    // Dekodery z /api/errors (ostatnie ~200 zdarzeń), pogrupowane po MAC.
-    $ev = $client->getEvents(isset($_GET['refresh']));
-    $by_mac = array();
-    foreach ($ev['events'] as $e) {
-        $m = &$by_mac[$e['mac']];
-        if (!isset($m)) {
-            $m = array('mac' => $e['mac'], 'ip' => $e['ip'], 'model' => $e['model'], 'errors' => 0, 'anomaly' => 0, 'events' => 0, 'groups' => array(), 'ts' => 0);
+    // PERF: maski CIDR precomputowane raz na render; in_cidr tylko porównuje gotowe wartości.
+    $cidr_masks = array();
+    foreach ($subnets as $sn) {
+        $parts = explode('/', $sn['cidr']) + array('', '32');
+        $netl = ip2long(trim((string) $parts[0]));
+        $bits = $parts[1] ?? '32';
+        if ($netl === false || !ctype_digit((string) $bits) || (int) $bits > 32) {
+            continue;
         }
-        $m['events']++;
-        if ($e['errors'] > $anomaly_min) {
-            $m['anomaly'] = max($m['anomaly'], $e['errors']);
-        } else {
-            $m['errors'] = max($m['errors'], $e['errors']);
-        }
-        $m['groups'][$e['group']] = true;
-        if ($e['ts'] >= $m['ts']) {
-            $m['ts'] = $e['ts'];
-            $m['ip'] = $e['ip'] ?: $m['ip'];
-        }
-        unset($m);
+        $bits = (int) $bits;
+        $cidr_masks[$sn['cidr']] = array(
+            'net' => $netl,
+            'mask' => $bits == 0 ? 0 : (~((1 << (32 - $bits)) - 1) & 0xFFFFFFFF),
+        );
     }
-
-    $in_cidr = function ($ip, $cidr) {
-        list($net, $bits) = explode('/', $cidr) + array('', '32');
-        $ipl = ip2long($ip);
-        $netl = ip2long($net);
-        if ($ipl === false || $netl === false || !ctype_digit((string) $bits) || (int) $bits > 32) {
+    $in_cidr = function ($ip, $cidr) use ($cidr_masks) {
+        if (!isset($cidr_masks[$cidr])) {
             return false;
         }
-        $mask = $bits == 0 ? 0 : (~((1 << (32 - (int) $bits)) - 1) & 0xFFFFFFFF);
-        return ($ipl & $mask) === ($netl & $mask);
+        $ipl = ip2long($ip);
+        if ($ipl === false) {
+            return false;
+        }
+        return ($ipl & $cidr_masks[$cidr]['mask']) === ($cidr_masks[$cidr]['net'] & $cidr_masks[$cidr]['mask']);
     };
-
-    // Klient w LMS: najpierw po MAC, potem po IP (dekodery IPTV zwykle nie są w LMS, więc to dopasowanie bywa puste).
-    $owner_by_mac = array();
-    $owner_by_ip = array();
-    $macs_ok = array_filter(array_keys($by_mac), function ($x) {
-        return preg_match('/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/', $x);
+    // Podsieci posortowane od najdłuższego prefiksu — pierwszy traf w pętli po podsieciach wygrywa.
+    $subnets_by_bits = $subnets;
+    usort($subnets_by_bits, function ($a, $b) {
+        $ba = (int) (explode('/', $a['cidr'])[1] ?? 32);
+        $bb = (int) (explode('/', $b['cidr'])[1] ?? 32);
+        return $bb <=> $ba;
     });
-    if ($heavy && $macs_ok) {
-        $in = "'" . implode("','", $macs_ok) . "'";
-        foreach ($DB->GetAll("SELECT lower(x.mac) AS mac, n.ownerid, c.lastname, c.name
-            FROM macs x JOIN nodes n ON n.id = x.nodeid JOIN customers c ON c.id = n.ownerid
-            WHERE n.ownerid IS NOT NULL AND lower(x.mac) IN ($in)") ?: array() as $r) {
-            $owner_by_mac[$r['mac']] = array('id' => $r['ownerid'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
-        }
-    }
-    $ips_long = array();
-    foreach ($by_mac as $m) {
-        $l = ip2long($m['ip']);
-        if ($l !== false) {
-            $ips_long[$l] = $m['ip'];
-        }
-    }
-    if ($heavy && $ips_long) {
-        $in = implode(',', array_map('intval', array_keys($ips_long)));
-        foreach ($DB->GetAll("SELECT n.ipaddr, n.ownerid, c.lastname, c.name
-            FROM nodes n JOIN customers c ON c.id = n.ownerid
-            WHERE n.ownerid IS NOT NULL AND n.ipaddr IN ($in)") ?: array() as $r) {
-            $owner_by_ip[(int) $r['ipaddr']] = array('id' => $r['ownerid'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
-        }
-    }
 
-    // Dekodery klientów z SMS SGT (przez LMSJamboxPlugin): MAC => numer klienta w SMS => klient LMS (customers.tv_cust_number).
-    $cust_by_number = array();
-    $numbers = array();
-    foreach ($by_mac as $mac => $m) {
-        $n = $stb['map'][$mac]['cust_number'] ?? '';
-        if ($n !== '' && ctype_digit($n)) {
-            $numbers[$n] = true;
-        }
-    }
-    if ($heavy && $numbers) {
-        $in = "'" . implode("','", array_keys($numbers)) . "'";
-        foreach ($DB->GetAll("SELECT id, tv_cust_number, lastname, name FROM customers WHERE deleted = 0 AND tv_cust_number IN ($in)") ?: array() as $r) {
-            $cust_by_number[$r['tv_cust_number']] = array('id' => $r['id'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
-        }
-    }
-
-    $devices = array();
-    foreach ($by_mac as $m) {
-        $label = '';
-        // Przy nakładających się podsieciach wygrywa najdłuższy prefiks.
-        $best_bits = -1;
-        foreach ($subnets as $sn) {
-            $bits = (int) (explode('/', $sn['cidr'])[1] ?? 32);
-            if ($bits > $best_bits && $m['ip'] !== '' && $in_cidr($m['ip'], $sn['cidr'])) {
-                $label = ($sn['num'] !== '' ? $sn['num'] . ' ' : '') . $sn['label'];
-                $best_bits = $bits;
+    // Helper: klienci LMS po numerach klienta z SMS (customers.tv_cust_number).
+    // SEC: bind IN (?) zamiast konkatenacji. PERF: wyniki cache'owane w obrębie requestu —
+    // ten sam numer nie jest pytany drugi raz (dekodery + kandydaci awarii).
+    $cust_by_number_cache = array();
+    $customers_by_numbers = function (array $numbers) use ($DB, &$cust_by_number_cache) {
+        $numbers = array_values(array_unique(array_filter($numbers, function ($n) {
+            return $n !== '' && ctype_digit((string) $n);
+        })));
+        $missing = array();
+        foreach ($numbers as $n) {
+            if (!array_key_exists($n, $cust_by_number_cache)) {
+                $missing[] = $n;
             }
         }
-        $ipl = ip2long($m['ip']);
-        $sms = $stb['map'][$m['mac']] ?? null;
-        $owner = ($sms && isset($cust_by_number[$sms['cust_number']])) ? $cust_by_number[$sms['cust_number']]
-            : ($owner_by_mac[$m['mac']] ?? ($ipl !== false ? ($owner_by_ip[$ipl] ?? null) : null));
-        $groups = array_keys($m['groups']);
-        usort($groups, 'strnatcmp');
-        $devices[] = array(
-            'mac' => strtoupper($m['mac']), 'ip' => $m['ip'], 'model' => $m['model'], 'subnet' => $label,
-            'errors' => $m['errors'], 'anomaly' => $m['anomaly'], 'events' => $m['events'], 'groups' => $groups, 'ts' => $m['ts'],
-            'customer_id' => $owner['id'] ?? null, 'customer_name' => $owner['name'] ?? null,
-            'groups_n' => count($groups),
-            'sms_number' => $sms['cust_number'] ?? '',
-            'serial' => $sms['serial'] ?? '',
-            'broken' => $sms['broken'] ?? false,
-            'in_sms' => $sms !== null,
-            'search' => mb_strtolower($m['mac'] . ' ' . $m['ip'] . ' ' . $m['model'] . ' ' . $label . ' ' . implode(' ', $groups) . ' ' . ($owner['name'] ?? '') . ' ' . ($sms['cust_number'] ?? '') . ' ' . ($sms['serial'] ?? ''), 'UTF-8'),
-        );
-    }
-    usort($devices, function ($a, $b) {
-        return [$b['errors'], $b['events']] <=> [$a['errors'], $a['events']] ?: strcmp($a['mac'], $b['mac']);
-    });
-    $devices_matched = count(array_filter($devices, function ($d) {
-        return $d['customer_id'] !== null;
-    }));
-    $broken_n = count(array_filter($devices, function ($d) {
-        return $d['broken'];
-    }));
-    if ($broken_n > 0) {
-        $hints[] = sprintf(trans('%d dekoderów z błędami ma w SMS oznaczenie „uszkodzony". Rozważ ich wymianę.'), $broken_n);
-    }
-    $many_groups = count(array_filter($devices, function ($d) {
-        return count($d['groups']) >= 5;
-    }));
-    if ($many_groups > 0) {
-        $hints[] = sprintf(
-            trans('%d dekoderów zgłasza błędy w co najmniej 5 różnych grupach multicast. Błędy w wielu kanałach naraz wskazują raczej na dekoder lub łącze klienta niż na jeden kanał. Zacznij od tabeli dekoderów.'),
-            $many_groups
-        );
-    }
-
-    // Dekodery w stanie awaryjnym: API podaje tylko liczby (model, podsieć), nie MAC. Kandydaci to dekodery z SMS SGT
-    // o modelu i adresie IP pasującym do modelu i podsieci z awarią. To założenie, nie dane z API.
-    $emg_models = array();
-    foreach ($models as $mo) {
-        if ($mo['emergency'] > 0) {
-            $emg_models[$mo['name']] = true;
-        }
-    }
-    $emg_subnets = array_values(array_filter($subnets, function ($sn) {
-        return $sn['emergency'] > 0;
-    }));
-    $with_errors_mac = array();
-    foreach ($devices as $d) {
-        $with_errors_mac[strtolower($d['mac'])] = $d['errors'];
-    }
-    $candidates = array();
-    if ($emg_models && $emg_subnets) {
-        foreach ($stb['map'] as $mac => $r) {
-            if (empty($emg_models[$r['model'] ?? '']) || ($r['stb_ip'] ?? '') === '') {
-                continue;
+        if ($missing) {
+            foreach ($DB->GetAll("SELECT id, tv_cust_number, lastname, name FROM customers WHERE deleted = 0 AND tv_cust_number IN (?)", array($missing)) ?: array() as $r) {
+                $cust_by_number_cache[$r['tv_cust_number']] = array('id' => $r['id'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
             }
-            foreach ($emg_subnets as $sn) {
-                if ($in_cidr($r['stb_ip'], $sn['cidr'])) {
-                    $candidates[] = array(
-                        'mac' => strtoupper($mac), 'ip' => $r['stb_ip'], 'model' => $r['model'], 'serial' => $r['serial'],
-                        'subnet' => ($sn['num'] !== '' ? $sn['num'] . ' ' : '') . $sn['label'],
-                        'sms_number' => $r['cust_number'], 'broken' => $r['broken'],
-                        'errors' => $with_errors_mac[$mac] ?? 0,
-                    );
-                    break;
+            foreach ($missing as $n) {
+                if (!array_key_exists($n, $cust_by_number_cache)) {
+                    $cust_by_number_cache[$n] = null; // pamiętamy też „brak”, żeby nie pytać ponownie w tym requeście
                 }
             }
         }
-        $cnums = array();
-        foreach ($candidates as $c) {
-            if ($c['sms_number'] !== '' && ctype_digit($c['sms_number'])) {
-                $cnums[$c['sms_number']] = true;
+        $out = array();
+        foreach ($numbers as $n) {
+            $out[$n] = $cust_by_number_cache[$n];
+        }
+        return $out;
+    };
+
+    // PERF: ciężki blok (zdarzenia → dekodery → kandydaci awarii) wykonujemy tylko dla view=devices/emg
+    // (i CSV t=devices/emg), a wynik cache'ujemy w pliku z TTL = iptv-errors.cache_ttl — nie przy każdym renderze.
+    $iptv_heavy_file = STORAGE_DIR . DIRECTORY_SEPARATOR . 'iptv-errors' . DIRECTORY_SEPARATOR . 'heavy-cache.json';
+    $heavy_cache = null;
+    if (is_readable($iptv_heavy_file)) {
+        $hc = json_decode((string) file_get_contents($iptv_heavy_file), true);
+        if (is_array($hc) && isset($hc['fetched'], $hc['data']) && is_array($hc['data'])) {
+            $heavy_cache = $hc;
+        }
+    }
+    $heavy_fresh = $heavy_cache !== null && ($now - (int) $heavy_cache['fetched']) < $cache_ttl;
+    $H = null;
+    if ($heavy) {
+        if ($heavy_cache !== null && $heavy_fresh && !$iptv_force) {
+            $H = $heavy_cache['data'];
+        }
+    } elseif ($heavy_cache !== null) {
+        // Poza widokami devices/emg bierzemy ostatni zachowany wynik (bez przeliczania).
+        $H = $heavy_cache['data'];
+    }
+    if ($heavy && $H === null) {
+        // Dekodery z /api/errors (ostatnie ~200 zdarzeń), pogrupowane po MAC.
+        $ev = $client->getEvents($iptv_force);
+        $by_mac = array();
+        foreach ($ev['events'] as $e) {
+            $m = &$by_mac[$e['mac']];
+            if (!isset($m)) {
+                $m = array('mac' => $e['mac'], 'ip' => $e['ip'], 'model' => $e['model'], 'errors' => 0, 'anomaly' => 0, 'events' => 0, 'groups' => array(), 'ts' => 0);
+            }
+            $m['events']++;
+            if ($e['errors'] > $anomaly_min) {
+                $m['anomaly'] = max($m['anomaly'], $e['errors']);
+            } else {
+                $m['errors'] = max($m['errors'], $e['errors']);
+            }
+            $m['groups'][$e['group']] = true;
+            if ($e['ts'] >= $m['ts']) {
+                $m['ts'] = $e['ts'];
+                $m['ip'] = $e['ip'] ?: $m['ip'];
+            }
+            unset($m);
+        }
+
+        // Klient w LMS: najpierw po MAC, potem po IP (dekodery IPTV zwykle nie są w LMS, więc to dopasowanie bywa puste).
+        // SEC: zero konkatenacji danych z zewnątrz — bindy IN (?).
+        $owner_by_mac = array();
+        $owner_by_ip = array();
+        $macs_ok = array_values(array_filter(array_keys($by_mac), function ($x) {
+            return preg_match('/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/', $x);
+        }));
+        if ($macs_ok) {
+            foreach ($DB->GetAll("SELECT lower(x.mac) AS mac, n.ownerid, c.lastname, c.name
+                FROM macs x JOIN nodes n ON n.id = x.nodeid JOIN customers c ON c.id = n.ownerid
+                WHERE n.ownerid IS NOT NULL AND lower(x.mac) IN (?)", array($macs_ok)) ?: array() as $r) {
+                $owner_by_mac[$r['mac']] = array('id' => $r['ownerid'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
             }
         }
-        $cust_c = array();
-        if ($heavy && $cnums) {
-            $in = "'" . implode("','", array_keys($cnums)) . "'";
-            foreach ($DB->GetAll("SELECT id, tv_cust_number, lastname, name FROM customers WHERE deleted = 0 AND tv_cust_number IN ($in)") ?: array() as $r) {
-                $cust_c[$r['tv_cust_number']] = array('id' => $r['id'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
+        $ips_long = array();
+        foreach ($by_mac as $m) {
+            $l = ip2long($m['ip']);
+            if ($l !== false) {
+                $ips_long[$l] = $m['ip'];
             }
         }
-        foreach ($candidates as &$c) {
-            $c['customer_id'] = $cust_c[$c['sms_number']]['id'] ?? null;
-            $c['customer_name'] = $cust_c[$c['sms_number']]['name'] ?? null;
-            $c['search'] = mb_strtolower($c['mac'] . ' ' . $c['ip'] . ' ' . $c['model'] . ' ' . $c['subnet'] . ' ' . $c['serial'] . ' ' . ($c['customer_name'] ?? '') . ' ' . $c['sms_number'], 'UTF-8');
+        if ($ips_long) {
+            foreach ($DB->GetAll("SELECT n.ipaddr, n.ownerid, c.lastname, c.name
+                FROM nodes n JOIN customers c ON c.id = n.ownerid
+                WHERE n.ownerid IS NOT NULL AND n.ipaddr IN (?)", array(array_map('intval', array_keys($ips_long)))) ?: array() as $r) {
+                $owner_by_ip[(int) $r['ipaddr']] = array('id' => $r['ownerid'], 'name' => trim($r['lastname'] . ' ' . $r['name']));
+            }
         }
-        unset($c);
-        // Najpierw dekodery z błędami w ostatnich zdarzeniach, potem uszkodzone w SMS.
-        usort($candidates, function ($a, $b) {
-            return [$b['errors'], (int) $b['broken']] <=> [$a['errors'], (int) $a['broken']] ?: strcmp($a['ip'], $b['ip']);
+
+        // Dekodery klientów z SMS SGT (przez LMSJamboxPlugin): MAC => numer klienta w SMS => klient LMS.
+        $numbers = array();
+        foreach ($by_mac as $mac => $m) {
+            $n = $stb['map'][$mac]['cust_number'] ?? '';
+            if ($n !== '' && ctype_digit($n)) {
+                $numbers[] = $n;
+            }
+        }
+        $cust_by_number = $customers_by_numbers($numbers);
+
+        $devices = array();
+        foreach ($by_mac as $m) {
+            $label = '';
+            // Przy nakładających się podsieciach wygrywa najdłuższy prefiks (sortowanie + pierwszy traf).
+            if ($m['ip'] !== '') {
+                foreach ($subnets_by_bits as $sn) {
+                    if ($in_cidr($m['ip'], $sn['cidr'])) {
+                        $label = ($sn['num'] !== '' ? $sn['num'] . ' ' : '') . $sn['label'];
+                        break;
+                    }
+                }
+            }
+            $ipl = ip2long($m['ip']);
+            $sms = $stb['map'][$m['mac']] ?? null;
+            $owner = ($sms && isset($cust_by_number[$sms['cust_number']])) ? $cust_by_number[$sms['cust_number']]
+                : ($owner_by_mac[$m['mac']] ?? ($ipl !== false ? ($owner_by_ip[$ipl] ?? null) : null));
+            $groups = array_keys($m['groups']);
+            usort($groups, 'strnatcmp');
+            $devices[] = array(
+                'mac' => strtoupper($m['mac']), 'ip' => $m['ip'], 'model' => $m['model'], 'subnet' => $label,
+                'errors' => $m['errors'], 'anomaly' => $m['anomaly'], 'events' => $m['events'], 'groups' => $groups, 'ts' => $m['ts'],
+                'customer_id' => $owner['id'] ?? null, 'customer_name' => $owner['name'] ?? null,
+                'groups_n' => count($groups),
+                'sms_number' => $sms['cust_number'] ?? '',
+                'serial' => $sms['serial'] ?? '',
+                'broken' => $sms['broken'] ?? false,
+                'in_sms' => $sms !== null,
+                'search' => mb_strtolower($m['mac'] . ' ' . $m['ip'] . ' ' . $m['model'] . ' ' . $label . ' ' . implode(' ', $groups) . ' ' . ($owner['name'] ?? '') . ' ' . ($sms['cust_number'] ?? '') . ' ' . ($sms['serial'] ?? ''), 'UTF-8'),
+            );
+        }
+        usort($devices, function ($a, $b) {
+            return [$b['errors'], $b['events']] <=> [$a['errors'], $a['events']] ?: strcmp($a['mac'], $b['mac']);
         });
+
+        // Dekodery w stanie awaryjnym: API podaje tylko liczby (model, podsieć), nie MAC. Kandydaci to dekodery z SMS SGT
+        // o modelu i adresie IP pasującym do modelu i podsieci z awarią. To założenie, nie dane z API.
+        // FEAT: budujemy też przy samej podsieci awaryjnej (bez modeli z API) + komunikat przyczyny.
+        $candidates = array();
+        $emg_reason = '';
+        if ($emg_subnets) {
+            $with_models = (bool) $emg_models;
+            $with_errors_mac = array();
+            foreach ($devices as $d) {
+                $with_errors_mac[strtolower($d['mac'])] = $d['errors'];
+            }
+            foreach ($stb['map'] as $mac => $r) {
+                $ip = (string) ($r['stb_ip'] ?? '');
+                if ($ip === '' || ($with_models && empty($emg_models[$r['model'] ?? '']))) {
+                    continue;
+                }
+                foreach ($emg_subnets as $sn) {
+                    if ($in_cidr($ip, $sn['cidr'])) {
+                        $candidates[] = array(
+                            'mac' => strtoupper($mac), 'ip' => $ip, 'model' => $r['model'], 'serial' => $r['serial'],
+                            'subnet' => ($sn['num'] !== '' ? $sn['num'] . ' ' : '') . $sn['label'],
+                            'sms_number' => $r['cust_number'], 'broken' => $r['broken'],
+                            'errors' => $with_errors_mac[$mac] ?? 0,
+                        );
+                        break;
+                    }
+                }
+            }
+            $cnums = array();
+            foreach ($candidates as $c) {
+                if ($c['sms_number'] !== '' && ctype_digit($c['sms_number'])) {
+                    $cnums[] = $c['sms_number'];
+                }
+            }
+            // Ten sam helper co wyżej — brak drugiego SQL dla tych samych numerów w tym requeście.
+            $cust_c = $customers_by_numbers($cnums);
+            foreach ($candidates as &$c) {
+                $c['customer_id'] = $cust_c[$c['sms_number']]['id'] ?? null;
+                $c['customer_name'] = $cust_c[$c['sms_number']]['name'] ?? null;
+                $c['search'] = mb_strtolower($c['mac'] . ' ' . $c['ip'] . ' ' . $c['model'] . ' ' . $c['subnet'] . ' ' . $c['serial'] . ' ' . ($c['customer_name'] ?? '') . ' ' . $c['sms_number'], 'UTF-8');
+            }
+            unset($c);
+            // Najpierw dekodery z błędami w ostatnich zdarzeniach, potem uszkodzone w SMS.
+            usort($candidates, function ($a, $b) {
+                return [$b['errors'], (int) $b['broken']] <=> [$a['errors'], (int) $a['broken']] ?: strcmp($a['ip'], $b['ip']);
+            });
+            $emg_reason = $with_models
+                ? trans('Kandydaci: dekodery z SMS SGT o modelu awaryjnym i adresie IP w podsieci awaryjnej. To założenie, nie dane z API.')
+                : trans('API podaje tylko podsieć awaryjną (bez modeli). Kandydaci: wszyscy dekodery z SMS SGT w tej podsieci. To założenie, nie dane z API.');
+        }
+
+        $broken_n = count(array_filter($devices, function ($d) {
+            return $d['broken'];
+        }));
+        $hints_extra = array();
+        if ($broken_n > 0) {
+            $hints_extra[] = sprintf(trans('%d dekoderów z błędami ma w SMS oznaczenie „uszkodzony". Rozważ ich wymianę.'), $broken_n);
+        }
+        $many_groups = count(array_filter($devices, function ($d) {
+            return count($d['groups']) >= 5;
+        }));
+        if ($many_groups > 0) {
+            $hints_extra[] = sprintf(
+                trans('%d dekoderów zgłasza błędy w co najmniej 5 różnych grupach multicast. Błędy w wielu kanałach naraz wskazują raczej na dekoder lub łącze klienta niż na jeden kanał. Zacznij od tabeli dekoderów.'),
+                $many_groups
+            );
+        }
+
+        $H = array(
+            'devices' => $devices,
+            'candidates' => $candidates,
+            'emg_reason' => $emg_reason,
+            'hints_extra' => $hints_extra,
+            'devices_events' => count($ev['events']),
+            'devices_matched' => count(array_filter($devices, function ($d) {
+                return $d['customer_id'] !== null;
+            })),
+            'devices_in_sms' => count(array_filter($devices, function ($d) {
+                return $d['in_sms'];
+            })),
+            'broken_count' => $broken_n,
+            'customers_count' => count(array_unique(array_filter(array_column($devices, 'sms_number')))),
+            'devices_error' => $ev['error'],
+        );
+        // Zapis atomowy, 0600 — plik zawiera dane klientów (tak jak pozostałe pliki storage pluginu).
+        if (is_dir(dirname($iptv_heavy_file))) {
+            $tmp = $iptv_heavy_file . '.' . getmypid() . '.tmp';
+            if (file_put_contents($tmp, json_encode(array('fetched' => $now, 'data' => $H))) !== false) {
+                @chmod($tmp, 0600);
+                @rename($tmp, $iptv_heavy_file);
+            } else {
+                @unlink($tmp);
+            }
+        }
+    }
+    $devices = $H['devices'] ?? array();
+    $candidates = $H['candidates'] ?? array();
+    if ($H !== null && !empty($H['hints_extra'])) {
+        $hints = array_merge($hints, $H['hints_extra']);
     }
 
     // Podsumowanie dla NOC: tylko to, co wymaga reakcji. Progi w src/IptvAlerts.php (z historii migawek).
+    // PERF: usable() raz na render (do zmiennej), expectedShares() raz dla obu prefiksów —
+    // logika zgodna z prywatnymi metodami IptvAlerts, policzona jeden raz zamiast w każdym wywołaniu.
+    $usable = array();
+    foreach ($history as $snap) {
+        $t = (int) ($snap['v']['total_errors'] ?? 0);
+        if ($t > 0 && $t <= IptvAlerts::MAX_USABLE_TOTAL) {
+            $usable[] = $snap;
+        }
+    }
+    $baseline_ok = $history
+        && ($now - (int) $history[0]['t']) >= IptvAlerts::MIN_BASELINE_HOURS * 3600
+        && count($usable) >= 36;
+    $usable_totals = array();
+    foreach ($usable as $snap) {
+        $usable_totals[] = (int) $snap['v']['total_errors'];
+    }
+    $normal = array(
+        'median' => (int) IptvAlerts::median($usable_totals),
+        'low' => (int) IptvAlerts::percentile($usable_totals, 0.10),
+        'high' => (int) IptvAlerts::percentile($usable_totals, 0.90),
+    );
+    $expected_shares = array();
+    foreach (array('subnet:', 'stream:') as $sh_prefix) {
+        $sh_keys = array();
+        foreach ($usable as $snap) {
+            foreach ($snap['v'] as $k => $v) {
+                if (strpos($k, $sh_prefix) === 0) {
+                    $sh_keys[$k] = true;
+                }
+            }
+        }
+        $shares = array();
+        foreach (array_keys($sh_keys) as $k) {
+            $vals = array();
+            foreach ($usable as $snap) {
+                $vals[] = (int) ($snap['v'][$k] ?? 0) / (int) $snap['v']['total_errors'];
+            }
+            $shares[$k] = IptvAlerts::median($vals);
+        }
+        $expected_shares[$sh_prefix] = $shares;
+    }
+    $prev_snap = null;
+    for ($i = count($history) - 1; $i >= 0; $i--) {
+        if ($now - (int) $history[$i]['t'] >= IptvAlerts::PREV_MIN_AGE) {
+            $prev_snap = $history[$i];
+            break;
+        }
+    }
+    // Jak IptvAlerts::excess(), ale na precomputowanych udziałach i poprzedniej migawce.
+    $excess = function (array $current, $total, $prefix, $min, $mult, $add) use ($expected_shares, $prev_snap) {
+        $shares = $expected_shares[$prefix];
+        $prev_total = $prev_snap ? (int) ($prev_snap['v']['total_errors'] ?? 0) : 0;
+        $out = array();
+        foreach ($current as $key => $errors) {
+            $share = $shares[$prefix . $key] ?? 0;
+            $expected = $share * $total;
+            if ($errors < $min || $errors < $mult * $expected + $add) {
+                continue;
+            }
+            $persisted = false;
+            if ($prev_snap && $prev_total > 0) {
+                $pe = (int) ($prev_snap['v'][$prefix . $key] ?? 0);
+                $persisted = $pe >= $min && $pe >= $mult * $share * $prev_total + $add;
+            }
+            $out[] = array('key' => $key, 'errors' => $errors, 'expected' => $expected, 'ratio' => $errors / max(1.0, $expected), 'persisted' => $persisted);
+        }
+        usort($out, function ($a, $b) {
+            return [(int) $b['persisted'], $b['errors']] <=> [(int) $a['persisted'], $a['errors']];
+        });
+        return $out;
+    };
+
     $alerts = array();
-    $baseline_ok = IptvAlerts::baselineOk($history, $now);
-    $normal = IptvAlerts::normalRange($history);
     $spike = array('level' => null, 'median' => 0, 'ratio' => 0);
     $subnet_alerts = array();
     $stream_alerts = array();
-    $subnet_label = function ($cidr) use ($subnets) {
-        foreach ($subnets as $sn) {
-            if ($sn['cidr'] === $cidr) {
-                return ($sn['num'] !== '' ? $sn['num'] . ' ' : '') . $sn['label'];
-            }
-        }
-        return $cidr;
-    };
+    // Indeks asocjacyjny etykiet podsieci (zamiast pętli po wszystkich podsieciach dla każdego alertu).
+    $subnet_label_by_cidr = array();
+    foreach ($subnets as $sn) {
+        $subnet_label_by_cidr[$sn['cidr']] = ($sn['num'] !== '' ? $sn['num'] . ' ' : '') . $sn['label'];
+    }
     if ($baseline_ok) {
         $spike = IptvAlerts::totalSpike($history, $data['total_errors']);
         if ($spike['level'] !== null) {
             $alerts[] = array(
-                'level' => $spike['level'] === 'bad' ? 'bad' : 'warn', 'view' => 'subnets',
+                'level' => $spike['level'] === 'bad' ? 'bad' : 'warn', 'view' => 'subnets', 'q' => '',
                 'text' => sprintf(
                     trans('Skok sumy błędów: %d, czyli %s razy więcej niż mediana z ostatniej godziny (%d). Jeśli rośnie we wszystkich podsieciach naraz, szukaj wspólnej przyczyny lub błędu licznika SGT.'),
                     $data['total_errors'], round($spike['ratio'], 1), $spike['median']
@@ -492,14 +709,14 @@ if ($data !== null) {
         foreach ($subnets as $sn) {
             $cur[$sn['cidr']] = $sn['errors'];
         }
-        foreach (array_slice(IptvAlerts::excess($cur, $data['total_errors'], $history, $now, 'subnet:', 10, 2, 3), 0, 3) as $a) {
+        foreach (array_slice($excess($cur, $data['total_errors'], 'subnet:', 10, 2, 3), 0, 3) as $a) {
             $subnet_alerts[] = $a;
             $alerts[] = array(
-                'level' => $a['persisted'] ? 'bad' : 'warn', 'view' => 'subnets',
+                'level' => $a['persisted'] ? 'bad' : 'warn', 'view' => 'subnets', 'q' => $a['key'],
                 'text' => sprintf(
                     $a['persisted'] ? trans('Podsieć %s: %d błędów, %s razy więcej niż zwykle, od co najmniej 2 odczytów.')
                         : trans('Podsieć %s: %d błędów, %s razy więcej niż zwykle. Obserwuj.'),
-                    $subnet_label($a['key']), $a['errors'], round($a['ratio'], 1)
+                    $subnet_label_by_cidr[$a['key']] ?? $a['key'], $a['errors'], round($a['ratio'], 1)
                 ),
             );
         }
@@ -507,27 +724,31 @@ if ($data !== null) {
         foreach ($streams as $st) {
             $cur[$st['group']] = $st['errors'];
         }
-        foreach (array_slice(IptvAlerts::excess($cur, $data['total_errors'], $history, $now, 'stream:', 40, 3, 3), 0, 2) as $a) {
+        foreach (array_slice($excess($cur, $data['total_errors'], 'stream:', 40, 3, 3), 0, 2) as $a) {
             if ($a['persisted']) {
                 $stream_alerts[] = $a;
                 $alerts[] = array(
-                    'level' => 'warn', 'view' => 'streams',
+                    'level' => 'warn', 'view' => 'streams', 'q' => $a['key'],
                     'text' => sprintf(trans('Grupa %s: %d błędów, %s razy więcej niż zwykle, od co najmniej 2 odczytów. Sprawdź źródło tego kanału.'), $a['key'], $a['errors'], round($a['ratio'], 1)),
                 );
             }
         }
     }
+    $heavy_ready = $H !== null;
     foreach ($emg_subnets as $sn) {
         $dur = IptvAlerts::emergencyDuration($history, 'subnet_emg:' . $sn['cidr'], $now);
         $mins = intdiv($dur['seconds'], 60);
         $dur_txt = $dur['seconds'] > 0 ? ($dur['full'] ? sprintf(trans('Trwa co najmniej %d h.'), intdiv($mins, 60))
             : sprintf(trans('Trwa %d h %d min.'), intdiv($mins, 60), $mins % 60)) : '';
+        $cand_txt = $heavy_ready
+            ? sprintf(trans('API nie podaje MAC, kandydatów jest %d.'), count($candidates))
+            : trans('API nie podaje MAC. Kandydatów szukaj w widoku „Awarie".');
         $alerts[] = array(
-            'level' => 'warn', 'view' => 'emg',
+            'level' => 'warn', 'view' => 'emg', 'q' => '',
             'text' => sprintf(
-                trans('Dekoder w stanie awaryjnym: %d, podsieć %s, modele: %s. API nie podaje MAC, kandydatów jest %d. %s'),
-                $sn['emergency'], ($sn['num'] !== '' ? $sn['num'] . ' ' : '') . $sn['label'],
-                $emg_models ? implode(', ', array_keys($emg_models)) : '-', count($candidates), $dur_txt
+                trans('Dekoder w stanie awaryjnym: %d, podsieć %s, modele: %s. %s %s'),
+                $sn['emergency'], $subnet_label_by_cidr[$sn['cidr']] ?? $sn['cidr'],
+                $emg_models ? implode(', ', array_keys($emg_models)) : '-', $cand_txt, $dur_txt
             ),
         );
     }
@@ -538,7 +759,7 @@ if ($data !== null) {
     }));
     if ($heavy_devices > 0) {
         $alerts[] = array(
-            'level' => 'info', 'view' => 'devices',
+            'level' => 'info', 'view' => 'devices', 'q' => '',
             'text' => sprintf(trans('Dekoderów z co najmniej 20 błędami w jednym odczycie: %d. To raczej problem dekodera lub łącza klienta niż kanału.'), $heavy_devices),
         );
     }
@@ -573,19 +794,16 @@ if ($data !== null) {
         'total_spark' => $spark('total_errors', $data['total_errors']),
         'devices' => $devices,
         'emergency_candidates' => $candidates,
-        'devices_events' => count($ev['events']),
+        'emergency_candidates_reason' => $H['emg_reason'] ?? '',
+        'devices_events' => $H['devices_events'] ?? 0,
         'devices_count' => count($devices),
-        'devices_matched' => $devices_matched,
-        'devices_in_sms' => count(array_filter($devices, function ($d) {
-            return $d['in_sms'];
-        })),
+        'devices_matched' => $H['devices_matched'] ?? 0,
+        'devices_in_sms' => $H['devices_in_sms'] ?? 0,
         'sms_available' => $stb['available'],
         'sms_error' => $stb['error'],
-        'broken_count' => count(array_filter($devices, function ($d) {
-            return $d['broken'];
-        })),
-        'customers_count' => count(array_unique(array_filter(array_column($devices, 'sms_number')))),
-        'devices_error' => $ev['error'],
+        'broken_count' => $H['broken_count'] ?? 0,
+        'customers_count' => $H['customers_count'] ?? 0,
+        'devices_error' => $H['devices_error'] ?? null,
         'hints' => $hints,
         'total_errors' => $data['total_errors'],
         'total_emergency' => $emergency_total,
@@ -606,8 +824,9 @@ if ($data !== null) {
     );
 }
 
-if (($_GET['action'] ?? '') === 'csv' && $data !== null) {
-    $table = $_GET['t'] ?? 'subnets';
+// Eksport CSV — tylko POST z tokenem CSRF (zweryfikowane na górze; GET na action=csv dostał 405).
+if ($iptv_action === 'csv' && $data !== null) {
+    $table = in_array($iptv_table, array('subnets', 'devices', 'streams', 'models', 'emg'), true) ? $iptv_table : 'subnets';
     $out_rows = array();
     $fmt = function ($d) {
         return $d === null ? '' : $d;
@@ -616,6 +835,12 @@ if (($_GET['action'] ?? '') === 'csv' && $data !== null) {
         $head = array('MAC', 'IP', 'Model', 'Serial', 'Podsieć', 'Błędy (max)', 'Zdarzeń', 'Grupy multicast', 'Ostatnio', 'Klient LMS', 'Nr SMS', 'Uszkodzony w SMS', 'Wartość odstająca');
         foreach ($view['devices'] as $r) {
             $out_rows[] = array($r['mac'], $r['ip'], $r['model'], $r['serial'], $r['subnet'], $r['errors'], $r['events'], implode(' ', $r['groups']), $r['ts'] ? date('Y-m-d H:i:s', $r['ts']) : '', $r['customer_name'] ?? '', $r['sms_number'], $r['broken'] ? 'tak' : '', $r['anomaly'] ?: '');
+        }
+    } elseif ($table === 'emg') {
+        // FEAT: eksport CSV także dla widoku awarii (kandydaci).
+        $head = array('MAC', 'IP', 'Model', 'Serial', 'Podsieć', 'Błędy', 'Nr SMS', 'Uszkodzony w SMS', 'Klient LMS');
+        foreach ($view['emergency_candidates'] as $r) {
+            $out_rows[] = array($r['mac'], $r['ip'], $r['model'], $r['serial'], $r['subnet'], $r['errors'], $r['sms_number'], $r['broken'] ? 'tak' : '', $r['customer_name'] ?? '');
         }
     } elseif ($table === 'streams') {
         $head = array('Grupa', 'Błędy', 'Zmiana (Δ)');
