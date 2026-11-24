@@ -5,7 +5,9 @@ Plugin LMS-PLUS dla NOC/ISP. Pokazuje błędy IPTV z monitoringu SGT: dekodery, 
 Menu: **TV → Błędy IPTV** (`?m=iptverrors`). Uprawnienie: `iptverrors_full_access`.
 Bez wtyczki `LMSJamboxPlugin` (sekcja TV) wpis trafia do menu **Sieci IP**.
 
+<!-- Przed publikacją dodaj zrzut ekranu (bez danych klientów) jako docs/screenshot.png i odkomentuj:
 ![Podsumowanie NOC](docs/screenshot.png?raw=true)
+-->
 
 Spis treści:
 
