@@ -1,8 +1,7 @@
 {extends file="layout.html"}
 {block name=title}::: LMS :{$layout.pagetitle|striphtml} :::{/block}
 {block name=module_content}
-{* $q będzie przypisywane przez modules/iptverrors.php (filtr z URL ?q=); domyślnie pusty *}
-{if !isset($iptv.q)}{assign var='iptv' value=array_merge($iptv ?? [], ['q' => ''])}{/if}
+{* $iptv.q jest zawsze przypisywane przez modules/iptverrors.php (filtr z URL ?q=) *}
 <link rel="stylesheet" href="plugins/LMSIptvErrorsPlugin/templates/iptverrors.css">
 <script src="plugins/LMSIptvErrorsPlugin/templates/iptverrors.js" defer></script>
 
