@@ -194,6 +194,28 @@ if ($data !== null) {
         return [$b['emergency'], $b['errors']] <=> [$a['emergency'], $a['errors']];
     });
 
+    // FEAT(diag): udział podsieci w sumie błędów (TOP PODSIECI) + health score 0-100 (100 = najgorzej).
+    // Wagi: błędy vs max_subnet 50%, awaria 30%, trend Δ z historii 20%.
+    $subnet_sum = array_sum(array_column($subnets, 'errors'));
+    $max_subnet = max(1, max(array_column($subnets, 'errors') ?: array(1)));
+    foreach ($subnets as &$sn) {
+        $sn['share'] = $subnet_sum > 0 ? round($sn['errors'] * 100 / $subnet_sum, 1) : 0;
+        $err_part = $sn['errors'] / $max_subnet;
+        $emg_part = $sn['emergency'] > 0 ? 1 : 0;
+        $base = max(1, $sn['errors'] - (int) ($sn['delta'] ?? 0));
+        $trend_part = ($sn['delta'] !== null && $sn['delta'] > 0) ? min(1, $sn['delta'] / $base) : 0;
+        $sn['health'] = max(0, min(100, (int) round(100 * (0.5 * $err_part + 0.3 * $emg_part + 0.2 * $trend_part))));
+    }
+    unset($sn);
+    // Top-3 najgorsze podsieci wg health — alerty na podsumowaniu (view='').
+    $worst_subnets = $subnets;
+    usort($worst_subnets, function ($a, $b) {
+        return [$b['health'], $b['errors']] <=> [$a['health'], $a['errors']];
+    });
+    $worst_subnets = array_values(array_filter(array_slice($worst_subnets, 0, 3), function ($s) {
+        return $s['health'] > 0;
+    }));
+
     // API zwraca czasem total=0 przy awarii w modelu/podsieci, więc bierzemy największą z trzech wartości.
     $emergency_total = max(
         $data['total_emergency'],
@@ -224,9 +246,8 @@ if ($data !== null) {
         return $b['errors'] <=> $a['errors'] ?: strnatcmp($a['group'], $b['group']);
     });
 
-    // Wnioski: tylko fakty wynikające z danych.
+    // Wnioski: tylko fakty wynikające z danych. ($subnet_sum policzone wyżej, przy health score.)
     $insights = array();
-    $subnet_sum = array_sum(array_column($subnets, 'errors'));
     $with_err = count(array_filter($subnets, function ($s) {
         return $s['errors'] > 0;
     }));
@@ -775,6 +796,19 @@ if ($data !== null) {
             ),
         );
     }
+    // FEAT(diag): top-3 najgorsze podsieci wg health score jako alerty na podsumowaniu.
+    foreach ($worst_subnets as $sn) {
+        $alerts[] = array(
+            'level' => $sn['health'] >= 60 ? 'bad' : ($sn['health'] >= 30 ? 'warn' : 'info'),
+            'view' => 'subnets', 'q' => $sn['cidr'],
+            'text' => sprintf(
+                trans('Podsieć %s — health %d/100: %d błędów, awaria: %d, Δ: %s.'),
+                ($subnet_label_by_cidr[$sn['cidr']] ?? $sn['cidr']) . ' (' . $sn['cidr'] . ')',
+                $sn['health'], $sn['errors'], $sn['emergency'],
+                $sn['delta'] === null ? '—' : ($sn['delta'] > 0 ? '+' . $sn['delta'] : (string) $sn['delta'])
+            ),
+        );
+    }
     // Dekodery z dużą liczbą błędów w jednym odczycie. Progi 3 odczytów lub 5 grup dawały stały szum (15 z 104 dekoderów).
     // Pozycja informacyjna: nie zmienia koloru statusu.
     $heavy_devices = count(array_filter($devices, function ($d) {
@@ -840,8 +874,9 @@ if ($data !== null) {
         'models' => $models,
         'subnets' => $subnets,
         'streams' => $streams,
+        'worst_subnets' => $worst_subnets,
         'max_model' => max(1, max(array_column($models, 'errors') ?: array(1))),
-        'max_subnet' => max(1, max(array_column($subnets, 'errors') ?: array(1))),
+        'max_subnet' => $max_subnet,
         'max_stream' => max(1, max(array_column($streams, 'errors') ?: array(1))),
         'insights' => $insights,
     );

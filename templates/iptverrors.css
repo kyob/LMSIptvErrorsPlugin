@@ -30,6 +30,17 @@
 .iptv-bar { height: 10px; background: #3b6fb6; border-radius: 2px; min-width: 1px; }
 .iptv-bar.hi { background: #b00020; }
 .iptv-bar.mid { background: #e0a800; }
+.iptv-bar.lo { background: #1b7a3a; }
+
+/* Health score 0-100: pasek + wartość obok */
+.iptv-health { white-space: nowrap; }
+.iptv-health .iptv-bar-wrap { display: inline-block; vertical-align: middle; width: 90px; }
+.iptv-health .hv { display: inline-block; min-width: 2ch; margin-left: 6px; text-align: right; font-weight: bold; font-variant-numeric: tabular-nums; }
+.iptv-health .hv.mid { color: #9a6d00; }
+.iptv-health .hv.hi { color: #b00020; }
+
+/* Linki korelacji (grupa/model -> dekodery) */
+.iptv-go { font-size: 12px; font-weight: normal; margin-left: 6px; white-space: nowrap; }
 
 /* Plakietki / chipy progów */
 .iptv-badge { display: inline-block; padding: 0 6px; border-radius: 8px; background: #b00020; color: #fff; font-size: 12px; }

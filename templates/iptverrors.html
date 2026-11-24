@@ -47,6 +47,7 @@
             <label for="iptv-auto" title="{trans('Odświeża widok w tle co 60 s, bez przewijania strony')}"><input type="checkbox" id="iptv-auto"> {trans('Auto-odświeżanie co 60 s')}</label>
             {if $iptv.mode != ''}
                 <label for="iptv-only"><input type="checkbox" id="iptv-only" checked> {trans('Tylko z błędami')}</label>
+                {if $iptv.mode == 'devices'}<label for="iptv-silent" title="{trans('Pokaż tylko dekodery, których ostatnie zdarzenie jest starsze niż 24 h')}"><input type="checkbox" id="iptv-silent"> {trans('Cichy zanik (>24 h)')}</label>{/if}
                 <label for="iptv-q">{trans('Szukaj:')}
                     <input type="text" id="iptv-q" name="q" value="{$iptv.q|escape}" placeholder="{trans('klient, MAC, IP, model, podsieć, grupa, SMS, serial…')}" autocomplete="off">
                 </label>
@@ -176,22 +177,26 @@
         <table class="table table-striped table-hover iptv-tbl" id="iptv-subnets">
             <thead><tr>
                 <th scope="col">{trans('Nr')}</th><th scope="col">{trans('Lokalizacja')}</th><th scope="col">{trans('Podsieć')}</th>
-                <th scope="col" class="n">{trans('Błędy')}</th><th scope="col"></th><th scope="col" class="n">{trans('Awaria')}</th><th scope="col" class="n">Δ</th><th scope="col">{trans('24 h')}</th>
+                <th scope="col" class="n">{trans('Błędy')}</th><th scope="col" class="n" title="{trans('Udział błędów podsieci w sumie błędów wszystkich podsieci')}">{trans('Udział %')}</th><th scope="col"></th>
+                <th scope="col" class="n" title="{trans('Health score 0–100: 100 = najgorzej. Wagi: błędy vs największa podsieć 50%, awaria 30%, trend Δ z historii 20%.')}">{trans('Health')}</th>
+                <th scope="col" class="n">{trans('Awaria')}</th><th scope="col" class="n">Δ</th><th scope="col">{trans('24 h')}</th>
             </tr></thead>
             <tbody>
             {foreach $iptv.subnets as $s}
-                <tr data-n="{$s.errors + $s.emergency}" data-s="{($s.num|cat:' '|cat:$s.label|cat:' '|cat:$s.cidr|cat:'')|lower|escape}">
+                <tr data-n="{$s.errors + $s.emergency}" data-s="{($s.num|cat:' '|cat:$s.label|cat:' '|cat:$s.cidr|cat:' '|cat:$s.share)|lower|escape}">
                     <td>{$s.num|escape}</td>
                     <td>{$s.label|escape}</td>
                     <td><code>{$s.cidr|escape}</code></td>
                     <td class="n"><span class="iptv-chip {if $s.errors >= 20}hi{elseif $s.errors >= 8}mid{/if}">{$s.errors}</span></td>
+                    <td class="n">{$s.share}%</td>
                     <td class="iptv-bar-wrap"><div class="iptv-bar {if $s.errors*3 >= $iptv.max_subnet*2}hi{elseif $s.errors*3 >= $iptv.max_subnet}mid{/if}" style="width:{($s.errors*100/$iptv.max_subnet)|string_format:'%d'}%"></div></td>
+                    <td class="iptv-health"><div class="iptv-bar-wrap"><div class="iptv-bar {if $s.health >= 60}hi{elseif $s.health >= 30}mid{else}lo{/if}" style="width:{$s.health}%"></div></div><span class="hv{if $s.health >= 60} hi{elseif $s.health >= 30} mid{/if}">{$s.health}</span></td>
                     <td class="n">{if $s.emergency > 0}<span class="iptv-badge">{$s.emergency}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td class="n">{if $s.delta === null}<span class="iptv-zero">—</span>{elseif $s.delta > 0}<span class="iptv-up">▲+{$s.delta}</span>{elseif $s.delta < 0}<span class="iptv-down">▼{$s.delta}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td>{if $s.spark}<svg width="96" height="22" viewBox="0 0 96 22"><polyline points="{$s.spark}" fill="none" stroke="#3b6fb6" stroke-width="1.5"/></svg>{/if}</td>
                 </tr>
             {foreachelse}
-                <tr><td colspan="8" class="iptv-empty">{trans('Brak podsieci do wyświetlenia.')}</td></tr>
+                <tr><td colspan="10" class="iptv-empty">{trans('Brak podsieci do wyświetlenia.')}</td></tr>
             {/foreach}
             </tbody>
         </table>
@@ -221,7 +226,7 @@
             </tr></thead>
             <tbody>
             {foreach $iptv.devices as $d}
-                <tr class="{if $d.errors >= 20}iptv-row-hi{elseif $d.errors >= 10}iptv-row-warn{/if}" data-n="{$d.errors}" data-s="{$d.search|escape}">
+                <tr class="{if $d.errors >= 20}iptv-row-hi{elseif $d.errors >= 10}iptv-row-warn{/if}" data-n="{$d.errors}" data-ts="{$d.ts}" data-s="{$d.search|escape}">
                     <td class="lp">{$d@iteration}</td>
                     <td><code>{$d.mac|escape}</code> <button type="button" class="iptv-copy lms-ui-button lms-ui-button-secondary" data-copy="{$d.mac|escape}" data-copy-label="{trans('Kopiuj MAC')|escape}" title="{trans('Kopiuj MAC')}" aria-label="{trans('Kopiuj MAC')}"><i class="fas fa-copy"></i></button></td>
                     <td><code>{$d.ip|escape}</code></td>
@@ -255,7 +260,7 @@
             <tbody>
             {foreach $iptv.streams as $s}
                 <tr {if $s@iteration > 15}class="iptv-extra"{/if} data-n="{$s.errors}" data-s="{$s.group|lower|escape}">
-                    <td><code>{$s.group|escape}</code></td>
+                    <td><code>{$s.group|escape}</code> <a class="iptv-go" href="?m=iptverrors&view=devices&q={$s.group|escape:'url'}" title="{trans('Pokaż dekodery zgłaszające tę grupę')}">{trans('dekodery')} →</a></td>
                     <td class="n"><span class="iptv-chip {if $s.errors >= 20}hi{elseif $s.errors >= 8}mid{/if}">{$s.errors}</span></td>
                     <td class="iptv-bar-wrap"><div class="iptv-bar {if $s.errors*3 >= $iptv.max_stream*2}hi{elseif $s.errors*3 >= $iptv.max_stream}mid{/if}" style="width:{($s.errors*100/$iptv.max_stream)|string_format:'%d'}%"></div></td>
                     <td class="n">{if $s.delta === null}<span class="iptv-zero">—</span>{elseif $s.delta > 0}<span class="iptv-up">▲+{$s.delta}</span>{elseif $s.delta < 0}<span class="iptv-down">▼{$s.delta}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
@@ -274,22 +279,23 @@
         <div class="iptv-tbl-wrap">
         <table class="table table-striped table-hover iptv-tbl" id="iptv-models">
             <thead><tr>
-                <th scope="col">{trans('Model')}</th><th scope="col" class="n">{trans('Błędy')}</th><th scope="col">{trans('Udział')}</th><th scope="col" class="n" title="{trans('Błędy podzielone przez liczbę zarejestrowanych dekoderów tego modelu (SMS SGT)')}">{trans('Stawka')}</th><th scope="col"></th><th scope="col" class="n">{trans('Awaria')}</th><th scope="col" class="n">Δ</th><th scope="col">{trans('24 h')}</th>
+                <th scope="col">{trans('Model')}</th><th scope="col" class="n">{trans('Błędy')}</th><th scope="col">{trans('Udział')}</th><th scope="col" class="n" title="{trans('Błędy podzielone przez liczbę zarejestrowanych dekoderów tego modelu (SMS SGT)')}">{trans('Stawka')}</th><th scope="col" class="n" title="{trans('Zarejestrowane dekodery tego modelu w SMS SGT')}">{trans('Dekodery')}</th><th scope="col"></th><th scope="col" class="n">{trans('Awaria')}</th><th scope="col" class="n">Δ</th><th scope="col">{trans('24 h')}</th>
             </tr></thead>
             <tbody>
             {foreach $iptv.models as $m}
                 <tr data-n="{$m.errors + $m.emergency}" data-s="{$m.name|lower|escape}">
-                    <td>{$m.name|escape}</td>
+                    <td><a href="?m=iptverrors&view=devices&q={$m.name|escape:'url'}" title="{trans('Pokaż dekodery tego modelu')}">{$m.name|escape}</a></td>
                     <td class="n"><strong>{$m.errors}</strong></td>
                     <td class="n">{$m.share}%</td>
                     <td class="n">{if $m.rate !== null}{$m.rate}% <span class="iptv-zero">({$m.registered})</span>{else}<span class="iptv-zero">—</span>{/if}</td>
+                    <td class="n">{if $m.registered > 0}<a class="iptv-go" href="?m=iptverrors&view=devices&q={$m.name|escape:'url'}" title="{trans('Pokaż dekodery tego modelu')}">{$m.registered} {trans('dekodery')}</a>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td class="iptv-bar-wrap"><div class="iptv-bar" style="width:{($m.errors*100/$iptv.max_model)|string_format:'%d'}%"></div></td>
                     <td class="n">{if $m.emergency > 0}<span class="iptv-badge">{$m.emergency}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td class="n">{if $m.delta === null}<span class="iptv-zero">—</span>{elseif $m.delta > 0}<span class="iptv-up">▲+{$m.delta}</span>{elseif $m.delta < 0}<span class="iptv-down">▼{$m.delta}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td>{if $m.spark}<svg width="96" height="22" viewBox="0 0 96 22"><polyline points="{$m.spark}" fill="none" stroke="#3b6fb6" stroke-width="1.5"/></svg>{/if}</td>
                 </tr>
             {foreachelse}
-                <tr><td colspan="8" class="iptv-empty">{trans('Brak modeli dekoderów do wyświetlenia.')}</td></tr>
+                <tr><td colspan="9" class="iptv-empty">{trans('Brak modeli dekoderów do wyświetlenia.')}</td></tr>
             {/foreach}
             </tbody>
         </table>
