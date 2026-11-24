@@ -6,7 +6,9 @@
     'use strict';
 
     var LS_ONLY = 'iptv-only';
+    var LS_SILENT = 'iptv-silent';
     var LS_AUTO = 'iptv-auto';
+    var SILENT_AGE_S = 86400; /* cichy zanik: ostatnie zdarzenie starsze niż 24 h */
     var REFRESH_MS = 60000;
     var showAll = false;
 
@@ -15,6 +17,7 @@
     function content() { return document.getElementById('iptv-errors-content'); }
     function qInput() { return document.getElementById('iptv-q'); }
     function onlyBox() { return document.getElementById('iptv-only'); }
+    function silentBox() { return document.getElementById('iptv-silent'); }
     function autoBox() { return document.getElementById('iptv-auto'); }
     function label(name) {
         var c = content();
@@ -92,9 +95,18 @@
         }
     }
 
+    /* Cichy zanik: wiersz kwalifikuje się, gdy data-ts (ostatnie zdarzenie) jest starsze niż 24 h. */
+    function silentOk(r, nowSec) {
+        if (!r.hasAttribute('data-ts')) { return false; }
+        var ts = parseInt(r.getAttribute('data-ts'), 10);
+        return !isNaN(ts) && ts > 0 && (nowSec - ts) > SILENT_AGE_S;
+    }
+
     function apply() {
         var q = qInput();
         var only = onlyBox();
+        var silent = silentBox();
+        var nowSec = Math.floor(Date.now() / 1000);
         var term = q ? q.value.trim().toLowerCase() : '';
         var list = rows();
         var visible = 0;
@@ -107,6 +119,7 @@
             var n = parseInt(r.getAttribute('data-n'), 10);
             var s = r.getAttribute('data-s') || '';
             var hide = (only && only.checked && (isNaN(n) ? 0 : n) === 0)
+                || (silent && silent.checked && !silentOk(r, nowSec))
                 || (term && s.toLowerCase().indexOf(term) === -1)
                 || (!term && !showAll && r.classList.contains('iptv-extra'));
             r.style.display = hide ? 'none' : '';
@@ -141,6 +154,9 @@
         var o = load(LS_ONLY);
         var only = onlyBox();
         if (o !== null && only) { only.checked = o === '1'; }
+        var si = load(LS_SILENT);
+        var silent = silentBox();
+        if (si !== null && silent) { silent.checked = si === '1'; }
         var auto = autoBox();
         if (auto) { auto.checked = load(LS_AUTO) === '1'; }
     }
@@ -218,6 +234,7 @@
     document.addEventListener('change', function (e) {
         if (!e.target) { return; }
         if (e.target.id === 'iptv-only') { store(LS_ONLY, e.target.checked ? '1' : '0'); apply(); }
+        if (e.target.id === 'iptv-silent') { store(LS_SILENT, e.target.checked ? '1' : '0'); apply(); }
         if (e.target.id === 'iptv-auto') { store(LS_AUTO, e.target.checked ? '1' : '0'); }
     });
 
