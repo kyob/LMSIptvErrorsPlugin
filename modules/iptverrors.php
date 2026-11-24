@@ -140,6 +140,11 @@ $view = array(
     'history_count' => count($history),
     'snapshot_age' => $history ? $now - (int) end($history)['t'] : null,
     'history_hours' => count($history) > 1 ? round(($now - (int) $history[0]['t']) / 3600, 1) : 0,
+    // Wersja assetów (cache-busting CSS/JS przy zmianie plików w repo).
+    'asset_ver' => max(
+        (int) @filemtime(__DIR__ . '/../templates/iptverrors.css'),
+        (int) @filemtime(__DIR__ . '/../templates/iptverrors.js')
+    ),
 );
 
 if ($data !== null) {

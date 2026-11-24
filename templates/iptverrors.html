@@ -2,8 +2,8 @@
 {block name=title}::: LMS :{$layout.pagetitle|striphtml} :::{/block}
 {block name=module_content}
 {* $iptv.q jest zawsze przypisywane przez modules/iptverrors.php (filtr z URL ?q=) *}
-<link rel="stylesheet" href="plugins/LMSIptvErrorsPlugin/templates/iptverrors.css">
-<script src="plugins/LMSIptvErrorsPlugin/templates/iptverrors.js" defer></script>
+<link rel="stylesheet" href="plugins/LMSIptvErrorsPlugin/templates/iptverrors.css?v={$iptv.asset_ver}">
+<script src="plugins/LMSIptvErrorsPlugin/templates/iptverrors.js?v={$iptv.asset_ver}" defer></script>
 
 <div class="lms-ui-box">
     <div class="lms-ui-box-title"><i class="fas fa-tv"></i> {trans('Błędy IPTV')}</div>
