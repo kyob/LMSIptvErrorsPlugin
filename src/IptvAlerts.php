@@ -186,6 +186,18 @@ class IptvAlerts
     }
 
     /**
+     * Szereg czasowy błędów jednego dekodera (MAC) prosto z historii migawek:
+     * lista ['t' => ts, 'errors' => n]. Migawki bez 'devices_top' (stary format)
+     * są pomijane — brak danych, nie zero. Dekoder poza top 100 ma errors = 0.
+     *
+     * @return array lista ['t' => int, 'errors' => int]
+     */
+    public static function deviceSeries(array $history, $mac, $now, $hours = 24)
+    {
+        return IptvMetrics::deviceSeriesFromHistory($history, $mac, $now, $hours);
+    }
+
+    /**
      * Jak długo klucz awarii (np. subnet_emg:cidr) jest ciągle większy od zera.
      *
      * @return array ['seconds' => int, 'full' => bool] full = awaria od początku historii (czas jest dolną granicą)

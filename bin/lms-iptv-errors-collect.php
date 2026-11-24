@@ -86,8 +86,12 @@ try {
 }
 
 if (!$CLI_QUIET) {
+    // Ile MAC-ów weszło do devices_top ostatniej migawki (szereg per-MAC do timeline).
+    $hist = $client->history();
+    $last = $hist ? end($hist) : null;
+    $devices_top = is_array($last['devices_top'] ?? null) ? count($last['devices_top']) : 0;
     fwrite(STDOUT, sprintf(
-        "[%s] dekodery z błędami: %d, podsieci: %d, grupy multicast: %d\n",
-        date('Y-m-d H:i:s'), $data['total_errors'], count($data['subnets']), count($data['streams'])
+        "[%s] dekodery z błędami: %d, podsieci: %d, grupy multicast: %d, top MAC: %d\n",
+        date('Y-m-d H:i:s'), $data['total_errors'], count($data['subnets']), count($data['streams']), $devices_top
     ));
 }
