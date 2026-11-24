@@ -10,13 +10,16 @@ class IptvMetrics
     const FORCE_MIN_AGE = 15; // sekundy: ?refresh nie pyta API częściej (metryki, zdarzenia)
     const FORCE_MIN_AGE_STB = 60; // jw. dla rejestru dekoderów z SMS
     const FAILURE_BACKOFF = 90; // sekundy bez ponownych zapytań po błędzie źródła
-    const HISTORY_KEEP = 288; // 24 h przy snapshocie co 5 min
+    const HISTORY_KEEP = 288; // awaryjny limit liczby migawek (normalnie mieści się w HISTORY_TTL)
+    const HISTORY_TTL = 86400; // retencja historii po czasie: migawki starsze niż 24 h są odrzucane
+    const MAX_RESPONSE_BYTES = 1048576; // 1 MB: limit rozmiaru odpowiedzi API
 
     private $url;
     private $key;
     private $cache_ttl;
     private $history_interval;
     private $dir;
+    private static $jsonCache = array(); // cache plików JSON w ramach jednego requestu
 
     public function __construct()
     {
@@ -81,14 +84,22 @@ class IptvMetrics
             return array('events' => $cache['events'] ?? array(), 'fetched' => $cache['fetched'] ?? null, 'error' => $failed);
         }
         try {
-            $url = ConfigHelper::getConfig('iptv-errors.errors_url', preg_replace('#/metrics/?$#', '/errors', $this->url));
+            $url = ConfigHelper::getConfig('iptv-errors.errors_url', '');
+            if ($url === '' || $url === null) {
+                // Fallback z url bez końcówki /metrics zwróciłby ten sam adres (OpenMetrics)
+                // i próbował parsować go jako JSON — lepiej rzucić czytelny wyjątek konfiguracji.
+                $url = preg_replace('#/metrics/?$#', '/errors', $this->url);
+                if ($url === $this->url) {
+                    throw new RuntimeException('Błędna konfiguracja iptv-errors.url (brak końcówki /metrics) — ustaw jawnie iptv-errors.errors_url');
+                }
+            }
             $json = json_decode($this->fetch($url), true);
             if (!is_array($json) || !isset($json['data']) || !is_array($json['data'])) {
                 throw new RuntimeException('Nieoczekiwana odpowiedź /api/errors');
             }
             $events = array();
             foreach ($json['data'] as $e) {
-                $mac = strtolower((string) ($e['sgt']['device']['mac'] ?? ''));
+                $mac = self::normalizeMac($e['sgt']['device']['mac'] ?? '');
                 if ($mac === '') {
                     continue;
                 }
@@ -144,7 +155,7 @@ class IptvMetrics
             $res = $sms->get('stbGetRegistered', array('customer'));
             $map = array();
             foreach ((array) $res as $r) {
-                $mac = strtolower(str_replace('-', ':', (string) ($r['stb_mac'] ?? '')));
+                $mac = self::normalizeMac($r['stb_mac'] ?? '');
                 if ($mac === '') {
                     continue;
                 }
@@ -187,12 +198,21 @@ class IptvMetrics
         try {
             if ($message === null) {
                 @unlink($this->dir . DIRECTORY_SEPARATOR . 'fail-' . $source . '.json');
+                unset(self::$jsonCache['fail-' . $source . '.json']);
             } else {
                 $this->writeJson('fail-' . $source . '.json', array('t' => time(), 'msg' => $message));
             }
         } catch (Throwable $e) {
             error_log('[LMSIptvErrorsPlugin] ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Jedna normalizacja adresu MAC w całej wtyczce: małe litery, separator ':'.
+     */
+    private static function normalizeMac($mac)
+    {
+        return strtolower(str_replace('-', ':', trim((string) $mac)));
     }
 
     private function fetch($url = null)
@@ -205,12 +225,12 @@ class IptvMetrics
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 15,
             CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_MAXFILESIZE => self::MAX_RESPONSE_BYTES,
             CURLOPT_HTTPHEADER => array('X-API-Key: ' . $this->key, 'Accept: text/plain'),
         ));
         $body = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
-        curl_close($ch);
         if ($body === false) {
             throw new RuntimeException('Błąd połączenia z API: ' . $err);
         }
@@ -319,6 +339,18 @@ class IptvMetrics
         return array_filter($f);
     }
 
+    /**
+     * Zmiana wartości klucza względem migawki bazowej. Null, gdy klucz jest nowy
+     * (brak go w bazie) — UI pokazuje „nowa” zamiast udawać skok od zera.
+     */
+    public static function delta($baseline, $key, $value)
+    {
+        if (!is_array($baseline) || !array_key_exists($key, $baseline['v'] ?? array())) {
+            return null;
+        }
+        return (int) $value - (int) $baseline['v'][$key];
+    }
+
     public function history()
     {
         return $this->readJson('history.json') ?: array();
@@ -329,12 +361,20 @@ class IptvMetrics
      */
     public function collect()
     {
-        $text = $this->fetch();
-        $data = self::parse($text);
-        $now = time();
-        $this->writeJson('cache.json', array('fetched' => $now, 'data' => $data));
-        $this->recordHistory($data, $now, true);
-        return $data;
+        try {
+            $text = $this->fetch();
+            $data = self::parse($text);
+            $now = time();
+            $this->writeJson('cache.json', array('fetched' => $now, 'data' => $data));
+            $this->recordHistory($data, $now, true);
+            $this->markFailure('metrics', null);
+            return $data;
+        } catch (Throwable $e) {
+            error_log('[LMSIptvErrorsPlugin] collect: ' . $e->getMessage());
+            // Bez tego backoff 90 s działałby tylko w procesie web — strona biłaby prosto w API.
+            $this->markFailure('metrics', $e->getMessage());
+            throw $e;
+        }
     }
 
     private function recordHistory(array $data, $now, $always = false)
@@ -342,14 +382,26 @@ class IptvMetrics
         if (!is_dir($this->dir)) {
             return;
         }
-        $lock = fopen($this->dir . DIRECTORY_SEPARATOR . 'history.lock', 'c');
-        if ($lock === false || !flock($lock, LOCK_EX)) {
+        $lockFile = $this->dir . DIRECTORY_SEPARATOR . 'history.lock';
+        $lock = fopen($lockFile, 'c');
+        if ($lock === false) {
             return;
         }
+        if (!flock($lock, LOCK_EX)) {
+            fclose($lock);
+            return;
+        }
+        // Jak reszta storage: tylko właściciel.
+        @chmod($lockFile, 0600);
         $history = $this->readJson('history.json') ?: array();
         $last = $history ? end($history) : null;
         if ($always || !$last || ($now - (int) $last['t']) >= $this->history_interval) {
             $history[] = array('t' => $now, 'v' => self::flatten($data));
+            // Retencja po czasie: migawki starsze niż 24 h odpadają niezależnie od ich liczby.
+            $cutoff = $now - self::HISTORY_TTL;
+            $history = array_values(array_filter($history, function ($snap) use ($cutoff) {
+                return (int) $snap['t'] >= $cutoff;
+            }));
             $history = array_slice($history, -self::HISTORY_KEEP);
             $this->writeJson('history.json', $history);
         }
@@ -359,12 +411,19 @@ class IptvMetrics
 
     private function readJson($name)
     {
-        $file = $this->dir . DIRECTORY_SEPARATOR . $name;
-        if (!is_readable($file)) {
-            return null;
+        if (array_key_exists($name, self::$jsonCache)) {
+            return self::$jsonCache[$name];
         }
-        $json = json_decode((string) file_get_contents($file), true);
-        return is_array($json) ? $json : null;
+        $file = $this->dir . DIRECTORY_SEPARATOR . $name;
+        $data = null;
+        if (is_readable($file)) {
+            $json = json_decode((string) file_get_contents($file), true);
+            $data = is_array($json) ? $json : null;
+        }
+        // Leniwe czytanie z cache per-request: plik (stb.json, history.json, ...) czytany
+        // tylko gdy potrzebny i najwyżej raz na request.
+        self::$jsonCache[$name] = $data;
+        return $data;
     }
 
     private function writeJson($name, array $data)
@@ -379,5 +438,6 @@ class IptvMetrics
             @unlink($tmp);
             throw new RuntimeException('Nie można zapisać ' . $file);
         }
+        unset(self::$jsonCache[$name]);
     }
 }
