@@ -77,7 +77,7 @@ Migawki z sumą powyżej 500 nie liczą się do bazy.
 
 Oczekiwany udział to mediana udziału z migawek bez skoków. Baza wymaga co najmniej 6 h historii (36 migawek), inaczej status jest szary.
 Progi wybrano na podstawie jednej doby danych. Po 7 dniach historii przelicz je ponownie.
-Dekoder w stanie awaryjnym: API SGT podaje tylko liczbę (model, podsieć), bez MAC. Widok `emg` pokazuje kandydatów z SMS SGT o tym modelu i IP z tej podsieci. To założenie, nie dane z API.
+Dekoder w stanie awaryjnym: API SGT podaje tylko liczbę (model, podsieć), bez MAC. Widok `emg` pokazuje kandydatów z SMS SGT o tym modelu i IP z tej podsieci. To założenie, nie dane z API. Dopasowanie podsieci (`in_cidr`) obsługuje tylko IPv4 — podsieci IPv6 nie są matchowane.
 Wartość `errors` dekodera powyżej 1000 jest odstająca i nie liczy się jako błędy (plakietka „odstająca").
 
 ## Źródła danych

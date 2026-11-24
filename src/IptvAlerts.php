@@ -7,12 +7,27 @@
  */
 class IptvAlerts
 {
+    // Domyślne progi alarmów; każdy można nadpisać w uiconfig (sekcja iptv-errors,
+    // klucze iptv-errors.alert_threshold_*) — patrz self::threshold().
     const MIN_BASELINE_HOURS = 6; // krócej niż to mediana jest niestabilna
     const MAX_USABLE_TOTAL = 500; // migawki ze skokiem sumy nie liczą się do bazy
     const SPIKE_WINDOW = 12; // ostatnie migawki (ok. 1 h) do mediany sumy
     const SPIKE_BAD_MIN = 400;
     const SPIKE_WARN_MIN = 250;
     const PREV_MIN_AGE = 150; // "poprzednia" migawka musi być starsza niż 2,5 min (bieżąca bywa już zapisana)
+
+    private static $thresholds = array();
+
+    /**
+     * Próg alarmu z uiconfig (sekcja iptv-errors), keszowany w ramach jednego requestu.
+     */
+    private static function threshold($name, $default)
+    {
+        if (!array_key_exists($name, self::$thresholds)) {
+            self::$thresholds[$name] = (int) ConfigHelper::getConfig('iptv-errors.alert_threshold_' . $name, $default);
+        }
+        return self::$thresholds[$name];
+    }
 
     public static function median(array $values)
     {
@@ -42,7 +57,7 @@ class IptvAlerts
         $out = array();
         foreach ($history as $snap) {
             $t = (int) ($snap['v']['total_errors'] ?? 0);
-            if ($t > 0 && $t <= self::MAX_USABLE_TOTAL) {
+            if ($t > 0 && $t <= self::threshold('max_usable_total', self::MAX_USABLE_TOTAL)) {
                 $out[] = $snap;
             }
         }
@@ -52,7 +67,7 @@ class IptvAlerts
     public static function baselineOk(array $history, $now)
     {
         return $history
-            && ($now - (int) $history[0]['t']) >= self::MIN_BASELINE_HOURS * 3600
+            && ($now - (int) $history[0]['t']) >= self::threshold('min_baseline_hours', self::MIN_BASELINE_HOURS) * 3600
             && count(self::usable($history)) >= 36;
     }
 
@@ -76,16 +91,16 @@ class IptvAlerts
     public static function totalSpike(array $history, $total)
     {
         $recent = array();
-        foreach (array_slice($history, -self::SPIKE_WINDOW) as $snap) {
+        foreach (array_slice($history, -self::threshold('spike_window', self::SPIKE_WINDOW)) as $snap) {
             $recent[] = (int) ($snap['v']['total_errors'] ?? 0);
         }
         $median = self::median($recent);
         $ratio = $median > 0 ? $total / $median : 0;
         $level = null;
         if (count($recent) >= 6 && $median > 0) {
-            if ($ratio >= 2 && $total >= self::SPIKE_BAD_MIN) {
+            if ($ratio >= 2 && $total >= self::threshold('spike_bad_min', self::SPIKE_BAD_MIN)) {
                 $level = 'bad';
-            } elseif ($ratio >= 1.5 && $total >= self::SPIKE_WARN_MIN) {
+            } elseif ($ratio >= 1.5 && $total >= self::threshold('spike_warn_min', self::SPIKE_WARN_MIN)) {
                 $level = 'warn';
             }
         }
@@ -120,7 +135,7 @@ class IptvAlerts
     private static function previous(array $history, $now)
     {
         for ($i = count($history) - 1; $i >= 0; $i--) {
-            if ($now - (int) $history[$i]['t'] >= self::PREV_MIN_AGE) {
+            if ($now - (int) $history[$i]['t'] >= self::threshold('prev_min_age', self::PREV_MIN_AGE)) {
                 return $history[$i];
             }
         }
