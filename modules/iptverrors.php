@@ -19,7 +19,8 @@ const IPTV_BASELINE_MIN_AGE = 1800; // porównanie z migawką starszą niż 30 m
 const IPTV_BASELINE_TARGET = 3600;
 
 // SEC: akcje ze skutkiem ubocznym (refresh=1, action=csv) tylko na POST z tokenem CSRF.
-// Token = hash_hmac('sha256', session_id() . nazwa_akcji, klucz trzymany w sesji). GET na te akcje dostaje 405.
+// Token = hash_hmac('sha256', session_id() . nazwa_akcji, klucz trzymany w sesji).
+// GET na te akcje nie wykonuje nic — dostaje 303 do czystego URL (stare linki/zakładki nie wybuchają 405).
 $iptv_method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $iptv_action = isset($_POST['action']) ? (string) $_POST['action'] : (isset($_GET['action']) ? (string) $_GET['action'] : '');
 $iptv_table = isset($_POST['t']) ? (string) $_POST['t'] : (isset($_GET['t']) ? (string) $_GET['t'] : '');
@@ -43,9 +44,14 @@ if ($iptv_action === 'csv') {
 }
 foreach ($iptv_side_actions as $iptv_side) {
     if ($iptv_method !== 'POST') {
-        header('HTTP/1.1 405 Method Not Allowed');
-        header('Allow: POST');
-        exit('Method Not Allowed');
+        // GET (stary link/zakładka/refresh w URL): bezpieczne przekierowanie bez efektu ubocznego.
+        $iptv_clean = '?m=iptverrors';
+        if (!empty($_GET['view'])) {
+            $iptv_clean .= '&view=' . urlencode((string) $_GET['view']);
+        }
+        header('HTTP/1.1 303 See Other');
+        header('Location: ' . $iptv_clean);
+        exit;
     }
     if (!hash_equals($iptv_csrf_token($iptv_side), (string) ($_POST['iptv_csrf'] ?? ''))) {
         header('HTTP/1.1 403 Forbidden');
