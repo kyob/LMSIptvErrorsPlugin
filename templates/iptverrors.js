@@ -17,6 +17,7 @@
     function content() { return document.getElementById('iptv-errors-content'); }
     function qInput() { return document.getElementById('iptv-q'); }
     function onlyBox() { return document.getElementById('iptv-only'); }
+    function multiBox() { return document.getElementById('iptv-multi'); }
     function silentBox() { return document.getElementById('iptv-silent'); }
     function autoBox() { return document.getElementById('iptv-auto'); }
     function label(name) {

@@ -47,6 +47,7 @@
             <label for="iptv-auto" title="{trans('Odświeża widok w tle co 60 s, bez przewijania strony')}"><input type="checkbox" id="iptv-auto"> {trans('Auto-odświeżanie co 60 s')}</label>
             {if $iptv.mode != ''}
                 <label for="iptv-only"><input type="checkbox" id="iptv-only" checked> {trans('Tylko z błędami')}</label>
+                {if $iptv.mode == 'devices'}<label for="iptv-multi"><input type="checkbox" id="iptv-multi"> {trans('Klient ma >1 STB z błędami')}</label>{/if}
                 {if $iptv.mode == 'devices'}<label for="iptv-silent" title="{trans('Pokaż tylko dekodery, których ostatnie zdarzenie jest starsze niż 24 h')}"><input type="checkbox" id="iptv-silent"> {trans('Cichy zanik (>24 h)')}</label>{/if}
                 <label for="iptv-q">{trans('Szukaj:')}
                     <input type="text" id="iptv-q" name="q" value="{$iptv.q|escape}" placeholder="{trans('klient, MAC, IP, model, podsieć, grupa, SMS, serial…')}" autocomplete="off">
@@ -226,7 +227,7 @@
             </tr></thead>
             <tbody>
             {foreach $iptv.devices as $d}
-                <tr class="{if $d.errors >= 20}iptv-row-hi{elseif $d.errors >= 10}iptv-row-warn{/if}" data-n="{$d.errors}" data-ts="{$d.ts}" data-s="{$d.search|escape}">
+                <tr class="{if $d.errors >= 20}iptv-row-hi{elseif $d.errors >= 10}iptv-row-warn{/if}" data-n="{$d.errors}" data-ts="{$d.ts}" data-s="{$d.search|escape}"{if $d.customer_stb_n > 1} data-multi="1"{/if}>
                     <td class="lp">{$d@iteration}</td>
                     <td><code>{$d.mac|escape}</code> <button type="button" class="iptv-copy lms-ui-button lms-ui-button-secondary" data-copy="{$d.mac|escape}" data-copy-label="{trans('Kopiuj MAC')|escape}" title="{trans('Kopiuj MAC')}" aria-label="{trans('Kopiuj MAC')}"><i class="fas fa-copy"></i></button></td>
                     <td><code>{$d.ip|escape}</code></td>
@@ -237,7 +238,7 @@
                     <td class="n">{$d.events}</td>
                     <td>{foreach $d.groups as $g}<code>{$g|escape}</code>{if !$g@last}, {/if}{/foreach}{if $d.groups_n >= 5} <span class="iptv-badge" title="{trans('Błędy w wielu grupach naraz')}">{$d.groups_n}</span>{/if}</td>
                     <td class="n">{if $d.ts}<time datetime="{$d.ts|date_format:'%Y-%m-%dT%H:%M:%S'}" title="{$d.ts|date_format:'%Y-%m-%d %H:%M:%S'}">{$d.ts|date_format:'%d.%m.%Y %H:%M:%S'}</time>{else}<span class="iptv-zero">—</span>{/if}</td>
-                    <td>{if $d.customer_id}<a href="?m=customerinfo&id={$d.customer_id}">{$d.customer_name|escape}</a>{else}<span class="iptv-zero">—</span>{/if}</td>
+                    <td>{if $d.customer_id}<a href="?m=customerinfo&id={$d.customer_id}">{$d.customer_name|escape}</a>{if $d.customer_stb_n > 1} <span class="iptv-badge" title="{trans('Klient ma kilka dekoderów z błędami — prawdopodobnie problem po stronie klienta')|escape}">×{$d.customer_stb_n} STB</span>{/if}{else}<span class="iptv-zero">—</span>{/if}</td>
                     <td>{if $d.sms_number}{$d.sms_number|escape}{else}<span class="iptv-zero">—</span>{/if}</td>
                 </tr>
             {foreachelse}

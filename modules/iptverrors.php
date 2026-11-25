@@ -557,6 +557,17 @@ if ($data !== null) {
             return [$b['errors'], $b['events']] <=> [$a['errors'], $a['events']] ?: strcmp($a['mac'], $b['mac']);
         });
 
+        // Korelacja per klient: ilu jego dekoderów ma błędy (klient z >1 STB w błędach = zwykle problem po stronie klienta).
+        $stb_err_by_cust = array();
+        foreach ($devices as $d) {
+            if ($d['errors'] > 0 && $d['customer_id']) {
+                $stb_err_by_cust[$d['customer_id']] = ($stb_err_by_cust[$d['customer_id']] ?? 0) + 1;
+            }
+        }
+        foreach ($devices as $i => $d) {
+            $devices[$i]['customer_stb_n'] = $d['customer_id'] ? ($stb_err_by_cust[$d['customer_id']] ?? 0) : 0;
+        }
+
         // Dekodery w stanie awaryjnym: API podaje tylko liczby (model, podsieć), nie MAC. Kandydaci to dekodery z SMS SGT
         // o modelu i adresie IP pasującym do modelu i podsieci z awarią. To założenie, nie dane z API.
         // FEAT: budujemy też przy samej podsieci awaryjnej (bez modeli z API) + komunikat przyczyny.
