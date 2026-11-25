@@ -1,8 +1,8 @@
 /* LMSIptvErrorsPlugin — style widoku "Błędy IPTV" (templates/iptverrors.css) */
 
-/* Tokeny UI wg docs/ui-style-alfa-calm.md (wzór librechat.ai).
+/* Tokeny UI wg docs/ui-style-alfa-calm.md.
    Prefiks --alfa- przeciw kolizji z motywem LMS. Kolory semantyczne ciemniejsze
-   niż warianty Tailwind — kontrast WCAG AA z białym tekstem/tłem. */
+   ciemniejsze ze względu na kontrast WCAG AA z białym tekstem/tłem. */
 :root {
   --alfa-bg: #ffffff;
   --alfa-bg-panel: #f5f5f5;
@@ -43,7 +43,7 @@
 .iptv-box > .lms-ui-box-title { background: #f5f5f5 !important; color: #0a0a0a !important; border-bottom: 1px solid #e5e5e5 !important; font-weight: 600; }
 .iptv-box .lms-ui-box-content { background: #ffffff !important; padding: 16px 20px; }
 
-/* Przyciski w kontenerze pluginu wg librechat: secondary = szare tło + ramka + ciemny tekst (nie beż LMS), primary = czarny */
+/* Przyciski w kontenerze pluginu secondary = szare tło + ramka + ciemny tekst (nie beż LMS), primary = czarny */
 .iptv-box .lms-ui-button { border-radius: 6px; border-radius: 6px; border-radius: var(--alfa-radius-sm); font-weight: 500; transition: background var(--alfa-transition), border-color var(--alfa-transition); }
 .iptv-box .lms-ui-button-secondary { background: #ededed; background: #ededed; background: var(--alfa-surface-muted); color: #0a0a0a; color: #0a0a0a; color: var(--alfa-text); border: 1px solid #e5e5e5; border: 1px solid var(--alfa-border); }
 .iptv-box .lms-ui-button-secondary:hover { background: rgba(209, 209, 209, .5); background: rgba(209,209,209,.5); background: var(--alfa-hover); border-color: #a3a3a3; border-color: #a3a3a3; border-color: var(--alfa-ring); color: #0a0a0a; color: #0a0a0a; color: var(--alfa-text); }
