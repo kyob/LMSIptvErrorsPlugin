@@ -92,13 +92,13 @@
 .iptv-go { font-size: 12px; font-weight: normal; margin-left: 6px; white-space: nowrap; }
 
 /* Plakietki / chipy progów */
-.iptv-badge { display: inline-block; padding: 0 6px; border-radius: 8px; background: #b00020; background: var(--alfa-error); color: #fff; font-size: 12px; }
+.iptv-badge { display: inline-block; padding: 0 6px; border-radius: 8px; background: #b00020 !important; color: #fff !important; font-size: 12px; }
 .iptv-chip { display: inline-block; min-width: 28px; text-align: center; padding: 1px 8px; border-radius: 10px; font-weight: bold; background: #ffffff; background: var(--alfa-surface); border: 1px solid #e5e5e5; border: 1px solid var(--alfa-border); color: #0a0a0a; color: var(--alfa-text); }
 .iptv-tbl .iptv-chip { color: #0a0a0a; }
 .iptv-tbl .iptv-chip.mid { color: #5a4100; }
 .iptv-tbl .iptv-chip.hi { color: #fff; }
-.iptv-chip.mid { background: #f3c969; color: #5a4100; }
-.iptv-chip.hi { background: #b00020; background: var(--alfa-error); color: #fff; }
+.iptv-chip.mid { background: #f3c969 !important; color: #5a4100 !important; }
+.iptv-chip.hi { background: #b00020 !important; color: #fff !important; }
 .iptv-legend { margin: 6px 0 10px; }
 
 /* Delta: góra/dół; zero — kontrast WCAG AA (było #999 ≈ 2,7:1) */
@@ -166,15 +166,15 @@
 .iptv-nav .nm { font-weight: bold; line-height: 1.2; }
 .iptv-nav .ct { font-size: 12px; color: #737373; color: var(--alfa-text-muted); }
 /* pill: #9a6d00 z białym ≈ 4,6:1 (było #c58a00 ≈ 3,0:1) */
-.iptv-nav .pill { margin-left: auto; padding: 1px 9px; border-radius: 10px; color: #fff; font-size: 12px; font-weight: bold; background: #9a6d00; background: var(--alfa-warning); }
-.iptv-nav .pill.bad { background: #b00020; background: var(--alfa-error); }
+.iptv-nav .pill { margin-left: auto; padding: 1px 9px; border-radius: 10px; color: #fff !important; font-size: 12px; font-weight: bold; background: #9a6d00 !important; }
+.iptv-nav .pill.bad { background: #b00020 !important; }
 
 /* zakładki widoków */
 .iptv-tabs { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 0; margin: 0 0 14px; background: #ffffff; background: #ffffff; background: var(--alfa-surface); border-bottom: 1px solid var(--alfa-border); }
 .iptv-tabs a { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 6px; border-radius: var(--alfa-radius-sm); background: #ffffff; background: var(--alfa-surface); border: 1px solid var(--alfa-border); color: #0a0a0a; color: var(--alfa-text); text-decoration: none; font-weight: bold; }
 .iptv-tabs a:hover { background: #ededed; background: var(--alfa-surface-muted); border-color: #a3a3a3; border-color: var(--alfa-ring); }
 .iptv-tabs a.on { background: #171717; background: var(--alfa-primary); border-color: #171717; border-color: var(--alfa-primary); color: #fafafa; color: var(--alfa-primary-text); }
-.iptv-tabs a .pill { padding: 0 8px; border-radius: 10px; color: #fff; font-size: 12px; background: #9a6d00; background: var(--alfa-warning); }
-.iptv-tabs a .pill.bad { background: #b00020; background: var(--alfa-error); }
+.iptv-tabs a .pill { padding: 0 8px; border-radius: 10px; color: #fff !important; font-size: 12px; background: #9a6d00 !important; }
+.iptv-tabs a .pill.bad { background: #b00020 !important; }
 
 details.iptv-more > summary { cursor: pointer; color: #0a0a0a; color: var(--alfa-text); margin: 10px 0 6px; }
