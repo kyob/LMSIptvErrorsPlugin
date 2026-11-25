@@ -49,6 +49,19 @@
 .iptv-box .lms-ui-button-secondary:hover { background: rgba(209, 209, 209, .5); background: rgba(209,209,209,.5); background: var(--alfa-hover); border-color: #a3a3a3; border-color: #a3a3a3; border-color: var(--alfa-ring); color: #0a0a0a; color: #0a0a0a; color: var(--alfa-text); }
 .iptv-box a.lms-ui-button-secondary { text-decoration: none; }
 
+/* Pola formularza w kontenerze pluginu: białe tło + szara ramka (nie beż LMS #ebe4d6) */
+.iptv-box input[type="text"], .iptv-box input[type="search"], .iptv-box select {
+  background: #ffffff; background: var(--alfa-surface);
+  border: 1px solid #e5e5e5; border: 1px solid var(--alfa-border);
+  border-radius: 6px; border-radius: var(--alfa-radius-sm);
+  color: #0a0a0a; color: var(--alfa-text);
+  padding: 4px 8px; font-size: 14px;
+}
+.iptv-box input[type="text"]:focus, .iptv-box input[type="search"]:focus, .iptv-box select:focus {
+  outline: 2px solid #a3a3a3; outline: 2px solid var(--alfa-ring); outline-offset: 1px; border-color: #a3a3a3; border-color: var(--alfa-ring);
+}
+.iptv-box input::placeholder { color: #737373; color: var(--alfa-text-muted); }
+
 /* Listy komunikatów (insights / hints / błędy) */
 .iptv-ins { margin: 0 0 12px; padding: 0; list-style: none; }
 .iptv-ins li { padding: 5px 10px; margin-bottom: 4px; border-left: 4px solid var(--alfa-text-muted); background: #ededed; background: var(--alfa-surface-muted); }
