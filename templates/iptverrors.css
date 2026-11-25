@@ -39,9 +39,9 @@
 }
 
 /* Kontener pluginu: białe tło zamiast beżowego lms-ui-box z motywu LMS */
-.iptv-box { background: var(--alfa-bg); border: 1px solid var(--alfa-border); border-radius: var(--alfa-radius); }
-.iptv-box .lms-ui-box-title { background: var(--alfa-bg-panel); color: var(--alfa-text); border-bottom: 1px solid var(--alfa-border); }
-.iptv-box .lms-ui-box-content { background: var(--alfa-bg); }
+.iptv-box { background: #ffffff; background: var(--alfa-bg); border: 1px solid var(--alfa-border); border-radius: var(--alfa-radius); margin: 0 0 16px; }
+.iptv-box .lms-ui-box-title { background: #f5f5f5; background: var(--alfa-bg-panel); color: #0a0a0a; color: var(--alfa-text); border-bottom: 1px solid var(--alfa-border); }
+.iptv-box .lms-ui-box-content { background: #ffffff; background: var(--alfa-bg); padding: 16px 20px; }
 
 /* Listy komunikatów (insights / hints / błędy) */
 .iptv-ins { margin: 0 0 12px; padding: 0; list-style: none; }
@@ -116,15 +116,15 @@
 
 /* Hero: status + kafelki */
 .iptv-hero { display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch; margin: 12px 0 18px; }
-.iptv-status { flex: 2 1 420px; display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: var(--alfa-radius); color: #fff; background: #737373; background: var(--alfa-text-muted); }
+.iptv-hero .iptv-status { flex: 2 1 420px; display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: var(--alfa-radius); color: #fff !important; background: #737373; background: var(--alfa-text-muted); }
 .iptv-status .ic { font-size: 44px; line-height: 1; }
 .iptv-status .t { font-size: 24px; font-weight: bold; line-height: 1.2; }
 .iptv-status .s { font-size: 13px; opacity: .92; margin-top: 3px; }
-.iptv-status.green { background: #1b7a3a; background: var(--alfa-success); }
+.iptv-hero .iptv-status.green { background: #1b7a3a; background: var(--alfa-success); }
 /* żółty status: #9a6d00 ≈ 4,6:1 z białym (było #c58a00 ≈ 3,0:1) */
-.iptv-status.yellow { background: #9a6d00; background: var(--alfa-warning); }
-.iptv-status.red { background: #b00020; background: var(--alfa-error); }
-.iptv-status.gray { background: #737373; background: var(--alfa-text-muted); }
+.iptv-hero .iptv-status.yellow { background: #9a6d00; background: var(--alfa-warning); }
+.iptv-hero .iptv-status.red { background: #b00020; background: var(--alfa-error); }
+.iptv-hero .iptv-status.gray { background: #737373; background: var(--alfa-text-muted); }
 .iptv-tiles { flex: 3 1 520px; display: flex; flex-wrap: wrap; gap: 12px; }
 .iptv-tile { flex: 1 1 130px; padding: 12px 14px; border-radius: var(--alfa-radius); background: var(--alfa-surface); border: 1px solid var(--alfa-border); border-top: 5px solid var(--alfa-success); }
 .iptv-tile .v { font-size: 34px; font-weight: bold; line-height: 1.1; color: var(--alfa-success); }
