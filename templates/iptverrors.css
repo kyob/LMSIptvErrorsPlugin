@@ -38,6 +38,11 @@
   --alfa-hover: rgba(104, 104, 104, .3);
 }
 
+/* Kontener pluginu: białe tło zamiast beżowego lms-ui-box z motywu LMS */
+.iptv-box { background: var(--alfa-bg); border: 1px solid var(--alfa-border); border-radius: var(--alfa-radius); }
+.iptv-box .lms-ui-box-title { background: var(--alfa-bg-panel); color: var(--alfa-text); border-bottom: 1px solid var(--alfa-border); }
+.iptv-box .lms-ui-box-content { background: var(--alfa-bg); }
+
 /* Listy komunikatów (insights / hints / błędy) */
 .iptv-ins { margin: 0 0 12px; padding: 0; list-style: none; }
 .iptv-ins li { padding: 5px 10px; margin-bottom: 4px; border-left: 4px solid var(--alfa-text-muted); background: var(--alfa-surface-muted); }
