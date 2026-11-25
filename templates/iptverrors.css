@@ -94,6 +94,9 @@
 /* Plakietki / chipy progów */
 .iptv-badge { display: inline-block; padding: 0 6px; border-radius: 8px; background: #b00020; background: var(--alfa-error); color: #fff; font-size: 12px; }
 .iptv-chip { display: inline-block; min-width: 28px; text-align: center; padding: 1px 8px; border-radius: 10px; font-weight: bold; background: #ffffff; background: var(--alfa-surface); border: 1px solid #e5e5e5; border: 1px solid var(--alfa-border); color: #0a0a0a; color: var(--alfa-text); }
+.iptv-tbl .iptv-chip { color: #0a0a0a; }
+.iptv-tbl .iptv-chip.mid { color: #5a4100; }
+.iptv-tbl .iptv-chip.hi { color: #fff; }
 .iptv-chip.mid { background: #f3c969; color: #5a4100; }
 .iptv-chip.hi { background: #b00020; background: var(--alfa-error); color: #fff; }
 .iptv-legend { margin: 6px 0 10px; }
