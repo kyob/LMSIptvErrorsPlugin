@@ -78,9 +78,9 @@
 .iptv-tbl th.iptv-sortable::after { content: ' ⇅'; font-size: 10px; opacity: .45; }
 .iptv-tbl th.iptv-sort-asc::after { content: ' ▲'; opacity: 1; }
 .iptv-tbl th.iptv-sort-desc::after { content: ' ▼'; opacity: 1; }
-.iptv-tbl td { padding: 8px 12px; vertical-align: middle; border-bottom: 1px solid var(--alfa-border); color: #0a0a0a; color: #0a0a0a; color: var(--alfa-text); }
+.iptv-tbl td { padding: 8px 12px; vertical-align: middle; border-bottom: 1px solid var(--alfa-border); color: #0a0a0a; color: var(--alfa-text); background: transparent !important; }
 .iptv-tbl tbody tr:last-child td { border-bottom: none; }
-.iptv-tbl.table-striped tbody tr:nth-child(even), .iptv-tbl tbody tr:nth-child(even) { background: rgba(209,209,209,.5); background: var(--alfa-hover); }
+.iptv-tbl.table-striped tbody tr:nth-child(even) { background: rgba(209,209,209,.5) !important; background: var(--alfa-hover) !important; }
 .iptv-tbl tbody tr.iptv-row-hi { background: #ededed; background: var(--alfa-surface-muted); box-shadow: inset 4px 0 0 var(--alfa-error); }
 .iptv-tbl tbody tr.iptv-row-warn { background: #ededed; background: var(--alfa-surface-muted); box-shadow: inset 4px 0 0 var(--alfa-warning); }
 .iptv-tbl .lp { text-align: right; color: #737373; color: var(--alfa-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
