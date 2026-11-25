@@ -1,4 +1,4 @@
-# UI pluginów LMS: rekomendacje stylu (wzór: librechat.ai)
+# UI pluginów LMS: rekomendacje stylu (własny styl „alfa-calm” (inspiracja: librechat.ai))
 
 Źródło: https://www.librechat.ai (strona główna, /docs, /blog), analiza 2026-11-25.
 Pełna notatka w Obsidian: `projects/genieacs-plugin/ui-styl-rekomendacje-librechat-2026-11-25.md`.
