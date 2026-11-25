@@ -1,6 +1,6 @@
 /* LMSIptvErrorsPlugin — style widoku "Błędy IPTV" (templates/iptverrors.css) */
 
-/* Tokeny UI wg docs/ui-style-guide-librechat-2026-11-25.md (wzór librechat.ai).
+/* Tokeny UI wg docs/ui-style-alfa-calm.md (wzór librechat.ai).
    Prefiks --alfa- przeciw kolizji z motywem LMS. Kolory semantyczne ciemniejsze
    niż warianty Tailwind — kontrast WCAG AA z białym tekstem/tłem. */
 :root {
