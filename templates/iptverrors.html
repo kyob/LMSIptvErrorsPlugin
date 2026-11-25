@@ -190,8 +190,8 @@
                     <td><code>{$s.cidr|escape}</code> <a class="iptv-go" href="?m=iptverrors&view=devices&q={$s.cidr|escape:'url'}" title="{trans('Pokaż dekodery z błędami w tej podsieci')|escape}">{trans('STB →')}</a></td>
                     <td class="n"><span class="iptv-chip {if $s.errors >= 20}hi{elseif $s.errors >= 8}mid{/if}">{$s.errors}</span></td>
                     <td class="n">{$s.share}%</td>
-                    <td class="iptv-bar-wrap"><div class="iptv-bar {if $s.errors*3 >= $iptv.max_subnet*2}hi{elseif $s.errors*3 >= $iptv.max_subnet}mid{/if}" style="width:{($s.errors*100/$iptv.max_subnet)|string_format:'%d'}%"></div></td>
-                    <td class="iptv-health"><div class="iptv-bar-wrap"><div class="iptv-bar {if $s.health >= 60}hi{elseif $s.health >= 30}mid{else}lo{/if}" style="width:{$s.health}%"></div></div><span class="hv{if $s.health >= 60} hi{elseif $s.health >= 30} mid{/if}">{$s.health}</span></td>
+                    <td class="iptv-bar-wrap"><div class="iptv-bar {if $s.errors*3 >= $iptv.max_subnet*2}hi{elseif $s.errors*3 >= $iptv.max_subnet}mid{/if}" style="width:{($s.errors*100/$iptv.max_subnet)|string_format:'%d'}%" title="{trans('Udział błędów tej podsieci względem podsieci z największą liczbą błędów')}: {($s.errors*100/$iptv.max_subnet)|string_format:'%.1f'}% ({$s.errors} / max {$iptv.max_subnet})"></div></td>
+                    <td class="iptv-health"><div class="iptv-bar-wrap"><div class="iptv-bar {if $s.health >= 60}hi{elseif $s.health >= 30}mid{else}lo{/if}" style="width:{$s.health}%" title="{trans('Health score 0–100: 100 = najgorzej. Wagi: błędy vs największa podsieć 50%, awaria 30%, trend Δ z historii 20%')}"></div></div><span class="hv{if $s.health >= 60} hi{elseif $s.health >= 30} mid{/if}" title="{trans('Health score')} 0–100: {$s.health}">{$s.health}</span></td>
                     <td class="n">{if $s.emergency > 0}<span class="iptv-badge">{$s.emergency}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td class="n">{if $s.delta === null}<span class="iptv-zero">—</span>{elseif $s.delta > 0}<span class="iptv-up">▲+{$s.delta}</span>{elseif $s.delta < 0}<span class="iptv-down">▼{$s.delta}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td>{if $s.spark}<svg width="96" height="22" viewBox="0 0 96 22"><polyline points="{$s.spark}" fill="none" stroke="#3b6fb6" stroke-width="1.5"/></svg>{/if}</td>
@@ -263,7 +263,7 @@
                 <tr {if $s@iteration > 15}class="iptv-extra"{/if} data-n="{$s.errors}" data-s="{$s.group|lower|escape}">
                     <td><code>{$s.group|escape}</code> <a class="iptv-go" href="?m=iptverrors&view=devices&q={$s.group|escape:'url'}" title="{trans('Pokaż dekodery zgłaszające tę grupę')}">{trans('dekodery')} →</a></td>
                     <td class="n"><span class="iptv-chip {if $s.errors >= 20}hi{elseif $s.errors >= 8}mid{/if}">{$s.errors}</span></td>
-                    <td class="iptv-bar-wrap"><div class="iptv-bar {if $s.errors*3 >= $iptv.max_stream*2}hi{elseif $s.errors*3 >= $iptv.max_stream}mid{/if}" style="width:{($s.errors*100/$iptv.max_stream)|string_format:'%d'}%"></div></td>
+                    <td class="iptv-bar-wrap"><div class="iptv-bar {if $s.errors*3 >= $iptv.max_stream*2}hi{elseif $s.errors*3 >= $iptv.max_stream}mid{/if}" style="width:{($s.errors*100/$iptv.max_stream)|string_format:'%d'}%" title="{trans('Udział błędów tej grupy względem grupy z największą liczbą błędów')}: {($s.errors*100/$iptv.max_stream)|string_format:'%.1f'}% ({$s.errors} / max {$iptv.max_stream})"></div></td>
                     <td class="n">{if $s.delta === null}<span class="iptv-zero">—</span>{elseif $s.delta > 0}<span class="iptv-up">▲+{$s.delta}</span>{elseif $s.delta < 0}<span class="iptv-down">▼{$s.delta}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td>{if $s.spark}<svg width="96" height="22" viewBox="0 0 96 22"><polyline points="{$s.spark}" fill="none" stroke="#3b6fb6" stroke-width="1.5"/></svg>{/if}</td>
                 </tr>
@@ -290,7 +290,7 @@
                     <td class="n">{$m.share}%</td>
                     <td class="n">{if $m.rate !== null}{$m.rate}% <span class="iptv-zero">({$m.registered})</span>{else}<span class="iptv-zero">—</span>{/if}</td>
                     <td class="n">{if $m.registered > 0}<a class="iptv-go" href="?m=iptverrors&view=devices&q={$m.name|escape:'url'}" title="{trans('Pokaż dekodery tego modelu')}">{$m.registered} {trans('dekodery')}</a>{else}<span class="iptv-zero">0</span>{/if}</td>
-                    <td class="iptv-bar-wrap"><div class="iptv-bar" style="width:{($m.errors*100/$iptv.max_model)|string_format:'%d'}%"></div></td>
+                    <td class="iptv-bar-wrap"><div class="iptv-bar" style="width:{($m.errors*100/$iptv.max_model)|string_format:'%d'}%" title="{trans('Udział błędów tego modelu względem modelu z największą liczbą błędów')}: {($m.errors*100/$iptv.max_model)|string_format:'%.1f'}% ({$m.errors} / max {$iptv.max_model})"></div></td>
                     <td class="n">{if $m.emergency > 0}<span class="iptv-badge">{$m.emergency}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td class="n">{if $m.delta === null}<span class="iptv-zero">—</span>{elseif $m.delta > 0}<span class="iptv-up">▲+{$m.delta}</span>{elseif $m.delta < 0}<span class="iptv-down">▼{$m.delta}</span>{else}<span class="iptv-zero">0</span>{/if}</td>
                     <td>{if $m.spark}<svg width="96" height="22" viewBox="0 0 96 22"><polyline points="{$m.spark}" fill="none" stroke="#3b6fb6" stroke-width="1.5"/></svg>{/if}</td>
