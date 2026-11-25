@@ -76,6 +76,17 @@ Tokeny CSS (prefiks `--alfa-` przeciw kolizji z motywem LMS) — patrz blok `:ro
 - Zrzuty ekranu z cieniami, animacje marketingowe, duży nagłówek hero, teksty i hasła ze strony.
 - Zależności od Tailwind/Fumadocs — plugin używa własnych klas `.iptv-*` i tokenów `--alfa-*`.
 
+### Doprecyzowanie 2026-11-25 (po review screenshotów LMSIptvErrorsPlugin)
+
+- Kontener pluginu (`lms-ui-box`) musi mieć białe tło — klasa `.iptv-box` nadpisuje beżowy motyw LMS.
+- **Kolor stanu tylko na krawędzi, ikonie lub odznace — nigdy na całym tle kafla/wiersza/alertu.**
+  - Kafelki `.iptv-tile`: białe tło, kolorowa górna krawędź 5px + kolor wartości; wariant `.bad` bez różowego tła.
+  - Alerty `.iptv-alert`: białe tło + ramka 1px + lewa krawędź 8px w kolorze stanu + kolorowa ikona. Bez pastelowego tła.
+  - Wiersze tabeli `.iptv-row-hi/.iptv-row-warn`: tło `surface-muted` + `inset` krawędź 4px zamiast pełnego pastelowego tła.
+  - Listy `.iptv-ins li`: tło `surface-muted`, kolor tylko na `border-left`.
+  - Jedyny pełny kolorowy blok to hero-status `.iptv-status` (duży blok stanu, jak hero callout).
+- Tabele: białe tło, szary nagłówek (`bg-panel`, ciemny tekst), ramki `--alfa-border`, zebra `var(--alfa-hover)`.
+
 ### Odchylenia w LMSIptvErrorsPlugin (kontrast WCAG AA)
 
 - `--alfa-error` = `#b00020`, `--alfa-warning` = `#9a6d00`, `--alfa-success` = `#1b7a3a`, `--alfa-info` = `#3b6fb6` — ciemniejsze niż warianty Tailwind, bo tekst/białe tło wymaga lepszego kontrastu niż `#ef4444`/`#f59e0b`/`#22c55e`.

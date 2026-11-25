@@ -46,10 +46,10 @@
 /* Listy komunikatów (insights / hints / błędy) */
 .iptv-ins { margin: 0 0 12px; padding: 0; list-style: none; }
 .iptv-ins li { padding: 5px 10px; margin-bottom: 4px; border-left: 4px solid var(--alfa-text-muted); background: var(--alfa-surface-muted); }
-.iptv-ins li.bad { border-color: var(--alfa-error); background: #fde7ea; }
-.iptv-ins li.warn { border-color: var(--alfa-warning); background: #fff3cd; }
-.iptv-ins li.ok { border-color: var(--alfa-success); background: #e6f4ea; }
-.iptv-ins li.info { border-color: var(--alfa-info); background: #e8f0fb; }
+.iptv-ins li.bad { border-color: var(--alfa-error); }
+.iptv-ins li.warn { border-color: var(--alfa-warning); }
+.iptv-ins li.ok { border-color: var(--alfa-success); }
+.iptv-ins li.info { border-color: var(--alfa-info); }
 
 /* Tabele: klasy LMS (table table-striped table-hover) + kontener przewijany poziomo */
 .iptv-tbl-wrap { overflow-x: auto; margin-bottom: 14px; }
@@ -62,8 +62,8 @@
 .iptv-tbl td { padding: 6px 10px; vertical-align: middle; border-bottom: 1px solid var(--alfa-border); }
 .iptv-tbl tbody tr:last-child td { border-bottom: none; }
 .iptv-tbl.table-striped tbody tr:nth-child(even), .iptv-tbl tbody tr:nth-child(even) { background: var(--alfa-hover); }
-.iptv-tbl tbody tr.iptv-row-hi { background: #fde7ea; }
-.iptv-tbl tbody tr.iptv-row-warn { background: #fff3cd; }
+.iptv-tbl tbody tr.iptv-row-hi { background: var(--alfa-surface-muted); box-shadow: inset 4px 0 0 var(--alfa-error); }
+.iptv-tbl tbody tr.iptv-row-warn { background: var(--alfa-surface-muted); box-shadow: inset 4px 0 0 var(--alfa-warning); }
 .iptv-tbl .lp { text-align: right; color: var(--alfa-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .iptv-tbl .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .iptv-empty { text-align: center; color: var(--alfa-text-muted); padding: 14px; }
@@ -130,8 +130,8 @@
 .iptv-tile .v { font-size: 34px; font-weight: bold; line-height: 1.1; color: var(--alfa-success); }
 .iptv-tile .l { font-size: 12px; color: var(--alfa-text-muted); margin-top: 2px; }
 .iptv-tile.warn { border-top-color: var(--alfa-warning); }
-.iptv-tile.warn .v { color: #8a6a00; }
-.iptv-tile.bad { border-top-color: var(--alfa-error); background: #fde7ea; }
+.iptv-tile.warn .v { color: var(--alfa-warning); }
+.iptv-tile.bad { border-top-color: var(--alfa-error); }
 .iptv-tile.bad .v { color: var(--alfa-error); }
 .iptv-tile.iptv-zero { border-top-color: var(--alfa-text-muted); }
 .iptv-tile.iptv-zero .v { color: var(--alfa-text-muted); }
@@ -139,15 +139,15 @@
 
 /* Alerty "Wymaga reakcji" */
 .iptv-alerts { display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; }
-.iptv-alert { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: var(--alfa-radius-sm); border-left: 8px solid var(--alfa-info); background: #e8f0fb; }
+.iptv-alert { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: var(--alfa-radius-sm); border: 1px solid var(--alfa-border); border-left: 8px solid var(--alfa-info); background: var(--alfa-surface); }
 .iptv-alert .ic { font-size: 22px; width: 28px; text-align: center; color: var(--alfa-info); }
 .iptv-alert .tx { flex: 1; font-size: 14px; }
-.iptv-alert.warn { border-color: var(--alfa-warning); background: #fff3cd; }
+.iptv-alert.warn { border-left-color: var(--alfa-warning); }
 .iptv-alert.warn .ic { color: var(--alfa-warning); }
-.iptv-alert.bad { border-color: var(--alfa-error); background: #fde7ea; }
+.iptv-alert.bad { border-left-color: var(--alfa-error); }
 .iptv-alert.bad .ic { color: var(--alfa-error); }
 .iptv-alert a.go { white-space: nowrap; padding: 4px 12px; border-radius: 14px; background: var(--alfa-surface); border: 1px solid var(--alfa-border); font-weight: bold; }
-.iptv-ok { padding: 14px 18px; border-radius: var(--alfa-radius-sm); border-left: 8px solid var(--alfa-success); background: #e6f4ea; color: var(--alfa-success); font-size: 16px; font-weight: bold; margin: 0 0 16px; }
+.iptv-ok { padding: 14px 18px; border-radius: var(--alfa-radius-sm); border: 1px solid var(--alfa-border); border-left: 8px solid var(--alfa-success); background: var(--alfa-surface-muted); color: var(--alfa-success); font-size: 16px; font-weight: bold; margin: 0 0 16px; }
 
 /* kafelki nawigacji po widokach (podsumowanie) */
 .iptv-nav { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 14px; }
