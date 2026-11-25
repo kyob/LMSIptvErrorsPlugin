@@ -154,7 +154,7 @@
                 {foreach $iptv.emergency_candidates as $d}
                     <tr class="{if $d.errors > 0}iptv-row-warn{/if}" data-n="{$d.errors}" data-s="{$d.search|escape}">
                         <td class="lp">{$d@iteration}</td>
-                        <td><code>{$d.mac|escape}</code> <button type="button" class="iptv-copy lms-ui-button lms-ui-button-secondary" data-copy="{$d.mac|escape}" data-copy-label="{trans('Kopiuj MAC')|escape}" title="{trans('Kopiuj MAC')}" aria-label="{trans('Kopiuj MAC')}"><i class="fas fa-copy"></i></button></td>
+                        <td><code class="iptv-copy" data-copy="{$d.mac|escape}" title="{trans('Kopiuj MAC')|escape}" role="button" tabindex="0" aria-label="{trans('Kopiuj MAC')|escape}">{$d.mac|escape}</code></td>
                         <td><code>{$d.ip|escape}</code></td>
                         <td>{$d.model|escape}{if $d.broken} <span class="iptv-badge" title="{trans('Oznaczony w SMS jako uszkodzony')}">!</span>{/if}</td>
                         <td>{if $d.serial}<a href="https://sms.sgtsa.pl/sms/stock/tracestb/stb/{$d.serial|escape:'url'}" target="_blank" rel="noopener"><code>{$d.serial|escape}</code></a>{/if}</td>
@@ -229,7 +229,7 @@
             {foreach $iptv.devices as $d}
                 <tr class="{if $d.errors >= 20}iptv-row-hi{elseif $d.errors >= 10}iptv-row-warn{/if}" data-n="{$d.errors}" data-ts="{$d.ts}" data-s="{$d.search|escape}"{if $d.customer_stb_n > 1} data-multi="1"{/if}>
                     <td class="lp">{$d@iteration}</td>
-                    <td><code>{$d.mac|escape}</code> <button type="button" class="iptv-copy lms-ui-button lms-ui-button-secondary" data-copy="{$d.mac|escape}" data-copy-label="{trans('Kopiuj MAC')|escape}" title="{trans('Kopiuj MAC')}" aria-label="{trans('Kopiuj MAC')}"><i class="fas fa-copy"></i></button></td>
+                    <td><code class="iptv-copy" data-copy="{$d.mac|escape}" title="{trans('Kopiuj MAC')|escape}" role="button" tabindex="0" aria-label="{trans('Kopiuj MAC')|escape}">{$d.mac|escape}</code></td>
                     <td><code>{$d.ip|escape}</code></td>
                     <td>{$d.model|escape}{if $d.broken} <span class="iptv-badge" title="{trans('Oznaczony w SMS jako uszkodzony')}">!</span>{/if}</td>
                     <td>{if $d.serial}<a href="https://sms.sgtsa.pl/sms/stock/tracestb/stb/{$d.serial|escape:'url'}" target="_blank" rel="noopener"><code>{$d.serial|escape}</code></a>{/if}</td>

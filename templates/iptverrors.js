@@ -268,8 +268,13 @@
         if (cp) { copyText(cp.getAttribute('data-copy') || '', cp); }
     });
 
-    /* Skrót klawiszowy "/" fokusuje filtr q */
+    /* Skrót klawiszowy "/" fokusuje filtr q; Enter/Space na MAC kopiuje */
     document.addEventListener('keydown', function (e) {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.classList && e.target.classList.contains('iptv-copy')) {
+            e.preventDefault();
+            copyText(e.target.getAttribute('data-copy') || '', e.target);
+            return;
+        }
         if (e.key !== '/') { return; }
         var ae = document.activeElement;
         if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) { return; }
