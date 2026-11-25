@@ -186,7 +186,7 @@
                 <tr data-n="{$s.errors + $s.emergency}" data-s="{($s.num|cat:' '|cat:$s.label|cat:' '|cat:$s.cidr|cat:' '|cat:$s.share)|lower|escape}">
                     <td>{$s.num|escape}</td>
                     <td>{$s.label|escape}</td>
-                    <td><code>{$s.cidr|escape}</code></td>
+                    <td><code>{$s.cidr|escape}</code> <a class="iptv-go" href="?m=iptverrors&view=devices&q={$s.cidr|escape:'url'}" title="{trans('Pokaż dekodery z błędami w tej podsieci')|escape}">{trans('STB →')}</a></td>
                     <td class="n"><span class="iptv-chip {if $s.errors >= 20}hi{elseif $s.errors >= 8}mid{/if}">{$s.errors}</span></td>
                     <td class="n">{$s.share}%</td>
                     <td class="iptv-bar-wrap"><div class="iptv-bar {if $s.errors*3 >= $iptv.max_subnet*2}hi{elseif $s.errors*3 >= $iptv.max_subnet}mid{/if}" style="width:{($s.errors*100/$iptv.max_subnet)|string_format:'%d'}%"></div></td>

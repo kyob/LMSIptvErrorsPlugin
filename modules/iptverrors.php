@@ -524,11 +524,13 @@ if ($data !== null) {
         $devices = array();
         foreach ($by_mac as $m) {
             $label = '';
+            $cidr = '';
             // Przy nakładających się podsieciach wygrywa najdłuższy prefiks (sortowanie + pierwszy traf).
             if ($m['ip'] !== '') {
                 foreach ($subnets_by_bits as $sn) {
                     if ($in_cidr($m['ip'], $sn['cidr'])) {
                         $label = ($sn['num'] !== '' ? $sn['num'] . ' ' : '') . $sn['label'];
+                        $cidr = $sn['cidr'];
                         break;
                     }
                 }
@@ -548,7 +550,7 @@ if ($data !== null) {
                 'serial' => $sms['serial'] ?? '',
                 'broken' => $sms['broken'] ?? false,
                 'in_sms' => $sms !== null,
-                'search' => mb_strtolower($m['mac'] . ' ' . $m['ip'] . ' ' . $m['model'] . ' ' . $label . ' ' . implode(' ', $groups) . ' ' . ($owner['name'] ?? '') . ' ' . ($sms['cust_number'] ?? '') . ' ' . ($sms['serial'] ?? ''), 'UTF-8'),
+                'search' => mb_strtolower($m['mac'] . ' ' . $m['ip'] . ' ' . $m['model'] . ' ' . $label . ' ' . $cidr . ' ' . implode(' ', $groups) . ' ' . ($owner['name'] ?? '') . ' ' . ($sms['cust_number'] ?? '') . ' ' . ($sms['serial'] ?? ''), 'UTF-8'),
             );
         }
         usort($devices, function ($a, $b) {

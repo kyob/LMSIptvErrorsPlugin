@@ -118,3 +118,5 @@ $_LANG['zdarzeń, czyli'] = 'zdarzeń, czyli';
 $_LANG['zmiana (Δ) względem ok.'] = 'zmiana (Δ) względem ok.';
 $_LANG['Źródło: device-errors-api.sgt.net.pl (portal SGT). Historia i Δ powstają z migawek zapisywanych co 5 min (timer systemd).'] = 'Źródło: device-errors-api.sgt.net.pl (portal SGT). Historia i Δ powstają z migawek zapisywanych co 5 min (timer systemd).';
 $_LANG['Monitoring błędów IPTV: dekodery, podsieci, grupy multicast'] = 'Monitoring błędów IPTV: dekodery, podsieci, grupy multicast';
+$_LANG['STB →'] = 'STB →';
+$_LANG['Pokaż dekodery z błędami w tej podsieci'] = 'Pokaż dekodery z błędami w tej podsieci';
