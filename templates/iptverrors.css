@@ -144,7 +144,7 @@
 .iptv-status .s { font-size: 13px; opacity: .92; margin-top: 3px; }
 .iptv-hero .iptv-status.green { background: #1b7a3a !important; }
 /* żółty status: #9a6d00 ≈ 4,6:1 z białym (było #c58a00 ≈ 3,0:1) */
-.iptv-hero .iptv-status.yellow { background: #9a6d00 !important; }
+.iptv-hero .iptv-status.yellow { background: #f3c969 !important; color: #5a4100 !important; }
 .iptv-hero .iptv-status.red { background: #b00020 !important; }
 .iptv-hero .iptv-status.gray { background: #737373 !important; }
 .iptv-tiles { flex: 3 1 520px; display: flex; flex-wrap: wrap; gap: 12px; }
