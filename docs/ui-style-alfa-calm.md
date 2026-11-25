@@ -74,7 +74,7 @@ Tokeny CSS (prefiks `--alfa-` przeciw kolizji z motywem LMS) — patrz blok `:ro
 - Alerty `.iptv-alert`: białe tło + ramka 1px + lewa krawędź 8px w kolorze stanu + kolorowa ikona. Bez pastelowego tła.
 - Wiersze tabeli `.iptv-row-hi/.iptv-row-warn`: tło `surface-muted` + `inset` krawędź 4px zamiast pełnego pastelowego tła.
 - Listy `.iptv-ins li`: tło `surface-muted`, kolor tylko na `border-left`.
-- Jedyny pełny kolorowy blok to hero-status `.iptv-status` (duży blok stanu).
+- Hero-status `.iptv-status`: biały box + ramka + lewa krawędź 8px w kolorze stanu + kolorowa ikona (jak alert).
 - Tabele: białe tło, szary nagłówek (`bg-panel`, ciemny tekst), ramki `--alfa-border`, zebra `var(--alfa-hover)` na całym wierszu (`td` przezroczyste).
 - Słupki (`.iptv-bar`): szary tor `.iptv-bar-wrap` + kolorowy słupek z `min-width: 4px` i `title` z opisem.
 - Pola formularza w kontenerze pluginu: białe tło + szara ramka + ciemny tekst (nie beż motywu LMS).

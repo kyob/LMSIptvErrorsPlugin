@@ -138,15 +138,18 @@
 
 /* Hero: status + kafelki */
 .iptv-hero { display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch; margin: 12px 0 18px; }
-.iptv-hero .iptv-status { flex: 2 1 420px; display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: 8px; border-radius: var(--alfa-radius); color: #fff !important; background: #737373 !important; }
+.iptv-hero .iptv-status { flex: 2 1 420px; display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: 8px; color: #0a0a0a !important; background: #ffffff !important; border: 1px solid #e5e5e5 !important; border-left: 8px solid #737373 !important; }
 .iptv-status .ic { font-size: 44px; line-height: 1; }
 .iptv-status .t { font-size: 24px; font-weight: bold; line-height: 1.2; }
 .iptv-status .s { font-size: 13px; opacity: .92; margin-top: 3px; }
-.iptv-hero .iptv-status.green { background: #1b7a3a !important; }
+.iptv-hero .iptv-status.green { border-left-color: #1b7a3a !important; }
+.iptv-hero .iptv-status.green .ic { color: #1b7a3a !important; }
 /* żółty status: #9a6d00 ≈ 4,6:1 z białym (było #c58a00 ≈ 3,0:1) */
-.iptv-hero .iptv-status.yellow { background: #f3c969 !important; color: #5a4100 !important; }
-.iptv-hero .iptv-status.red { background: #b00020 !important; }
-.iptv-hero .iptv-status.gray { background: #737373 !important; }
+.iptv-hero .iptv-status.yellow { border-left-color: #e0a800 !important; }
+.iptv-hero .iptv-status.yellow .ic { color: #b45309 !important; }
+.iptv-hero .iptv-status.red { border-left-color: #b00020 !important; }
+.iptv-hero .iptv-status.red .ic { color: #b00020 !important; }
+.iptv-hero .iptv-status.gray { border-left-color: #737373 !important; }
 .iptv-tiles { flex: 3 1 520px; display: flex; flex-wrap: wrap; gap: 12px; }
 .iptv-tile { flex: 1 1 130px; padding: 12px 14px; border-radius: 8px; border-radius: var(--alfa-radius); background: #ffffff; background: var(--alfa-surface); border: 1px solid var(--alfa-border); border-top: 5px solid var(--alfa-success); }
 .iptv-tile .v { font-size: 34px; font-weight: bold; line-height: 1.1; color: #1b7a3a; color: var(--alfa-success); }
