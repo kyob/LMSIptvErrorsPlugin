@@ -138,15 +138,15 @@
 
 /* Hero: status + kafelki */
 .iptv-hero { display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch; margin: 12px 0 18px; }
-.iptv-hero .iptv-status { flex: 2 1 420px; display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: 8px; border-radius: var(--alfa-radius); color: #fff !important; background: #737373; background: #737373; background: var(--alfa-text-muted); }
+.iptv-hero .iptv-status { flex: 2 1 420px; display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: 8px; border-radius: var(--alfa-radius); color: #fff !important; background: #737373 !important; }
 .iptv-status .ic { font-size: 44px; line-height: 1; }
 .iptv-status .t { font-size: 24px; font-weight: bold; line-height: 1.2; }
 .iptv-status .s { font-size: 13px; opacity: .92; margin-top: 3px; }
-.iptv-hero .iptv-status.green { background: #1b7a3a; background: #1b7a3a; background: var(--alfa-success); }
+.iptv-hero .iptv-status.green { background: #1b7a3a !important; }
 /* żółty status: #9a6d00 ≈ 4,6:1 z białym (było #c58a00 ≈ 3,0:1) */
-.iptv-hero .iptv-status.yellow { background: #9a6d00; background: #9a6d00; background: var(--alfa-warning); }
-.iptv-hero .iptv-status.red { background: #b00020; background: #b00020; background: var(--alfa-error); }
-.iptv-hero .iptv-status.gray { background: #737373; background: #737373; background: var(--alfa-text-muted); }
+.iptv-hero .iptv-status.yellow { background: #9a6d00 !important; }
+.iptv-hero .iptv-status.red { background: #b00020 !important; }
+.iptv-hero .iptv-status.gray { background: #737373 !important; }
 .iptv-tiles { flex: 3 1 520px; display: flex; flex-wrap: wrap; gap: 12px; }
 .iptv-tile { flex: 1 1 130px; padding: 12px 14px; border-radius: 8px; border-radius: var(--alfa-radius); background: #ffffff; background: var(--alfa-surface); border: 1px solid var(--alfa-border); border-top: 5px solid var(--alfa-success); }
 .iptv-tile .v { font-size: 34px; font-weight: bold; line-height: 1.1; color: #1b7a3a; color: var(--alfa-success); }
