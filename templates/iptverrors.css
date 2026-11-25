@@ -89,10 +89,10 @@
 
 /* Pasek proporcji */
 .iptv-bar-wrap { width: 140px; background: #ededed; background: var(--alfa-surface-muted); border-radius: 2px; }
-.iptv-bar { height: 10px; background: #3b6fb6; background: var(--alfa-info); border-radius: 2px; min-width: 4px; }
-.iptv-bar.hi { background: #b00020; background: var(--alfa-error); }
-.iptv-bar.mid { background: #e0a800; }
-.iptv-bar.lo { background: #1b7a3a; background: var(--alfa-success); }
+.iptv-bar { height: 10px; background: #3b6fb6 !important; border-radius: 2px; min-width: 4px; }
+.iptv-bar.hi { background: #b00020 !important; }
+.iptv-bar.mid { background: #e0a800 !important; }
+.iptv-bar.lo { background: #1b7a3a !important; }
 
 /* Health score 0-100: pasek + wartość obok */
 .iptv-health { white-space: nowrap; }
