@@ -739,47 +739,80 @@ if ($data !== null) {
         // FEAT: widoki map korelacji adresowej (loc_lms / loc_lnms) — punkty do mapy + wiersze tabeli.
         // Budowane tylko przy odbudowie $H (razem z location/location_source), stąd lecą do heavy-cache.json
         // jako $H['loc_lms'] / $H['loc_lnms']; przy $H z cache bierzemy je stamtąd.
-        // Widok LMS: punkty = przełączniki LMS z niepustymi współrzędnymi (nd.longitude/latitude),
-        // count = liczba dekoderów z błędami podłączonych do tego switcha.
-        // Wiersze = wszystkie dekodery, których MAC jest w LMS (mapa źródła LMS sama w sobie),
-        // niezależnie od location_source — priorytet librenms dotyczy tylko kolumny „Lokalizacja”.
-        $loc_lms_data = array('points' => array(), 'rows' => array());
-        $lms_by_switch = array();
-        foreach ($devices as $d) {
-            $m = strtolower($d['mac']);
-            $sw = $sw_by_mac[$m] ?? null;
-            if ($sw === null) {
-                continue;
-            }
-            $loc_lms_data['rows'][] = array(
-                'mac' => $d['mac'], 'ip' => $d['ip'], 'customer_name' => $d['customer_name'],
-                'switch' => $sw['switch'], 'address' => $sw['address'],
-                'lat' => $sw['lat'], 'lng' => $sw['lng'], 'errors' => $d['errors'],
-            );
-            // Grupowanie po przełączniku (nazwa + adres), żeby jeden switch = jeden punkt na mapie.
-            $key = mb_strtolower($sw['switch'] . '|' . $sw['address'], 'UTF-8');
-            if (!isset($lms_by_switch[$key])) {
-                $lms_by_switch[$key] = array(
-                    'switch' => $sw['switch'], 'address' => $sw['address'],
-                    'lat' => $sw['lat'], 'lng' => $sw['lng'], 'count' => 0, 'macs' => array(),
+        //
+        // Mapa LMS: jeden punkt PER STB (tyle punktów ile dekoderów z lokalizacją).
+        // Współrzędne bierzemy z node klienta (nodes.ownerid + longitude/latitude) — zarówno gdy MAC
+        // siedzi w macs, jak i przez SMS cust_number -> customers. Jeśli klient nie ma node z GPS,
+        // punktu nie ma, ale wiersz tabeli ma adres + TERYT (location_cities.ident) z adresu klienta.
+        // SEC: bindy IN ?.
+        $gps_by_customer = array(); // customer_id => ['lat','lng','node','switch']
+        if ($cust_ids) {
+            foreach ($DB->GetAll("SELECT n.ownerid, n.name AS node_name, n.longitude, n.latitude,
+                    nd.name AS sw_name, n.port
+                FROM nodes n LEFT JOIN netdevices nd ON nd.id = n.netdev
+                WHERE n.ownerid IN ? AND n.longitude IS NOT NULL AND n.latitude IS NOT NULL
+                ORDER BY n.id", array($cust_ids)) ?: array() as $r) {
+                $cid = (int) $r['ownerid'];
+                if (isset($gps_by_customer[$cid])) {
+                    continue; // pierwszy node z GPS wystarczy
+                }
+                $sw = trim((string) $r['sw_name'] . ($r['sw_name'] !== '' && (int) $r['port'] > 0 ? ' port ' . (int) $r['port'] : ''));
+                $gps_by_customer[$cid] = array(
+                    'lat' => (float) $r['longitude'], 'lng' => (float) $r['latitude'],
+                    'node' => (string) $r['node_name'], 'switch' => $sw,
                 );
             }
-            if ($d['errors'] > 0) {
-                $lms_by_switch[$key]['count']++;
-                $lms_by_switch[$key]['macs'][] = $d['mac'];
+        }
+        // Adres klienta + TERYT miasta (fallback gdy brak node z GPS) — customer_addresses type=1 to adres klienta.
+        $addr_by_customer = array(); // customer_id => ['address','teryt','city']
+        if ($cust_ids) {
+            foreach ($DB->GetAll("SELECT ca.customer_id, a.name AS addr_name, a.city, a.zip,
+                    lc.ident AS teryt, lc.name AS teryt_name
+                FROM customer_addresses ca
+                JOIN addresses a ON a.id = ca.address_id
+                LEFT JOIN location_cities lc ON lc.id = a.city_id
+                WHERE ca.customer_id IN ? AND ca.type = 1", array($cust_ids)) ?: array() as $r) {
+                $cid = (int) $r['customer_id'];
+                $addr = trim((string) ($r['addr_name'] !== '' ? $r['addr_name'] : trim((string) $r['city'] . ' ' . (string) $r['zip'])));
+                $addr_by_customer[$cid] = array(
+                    'address' => $addr,
+                    'teryt' => (string) ($r['teryt'] ?? ''),
+                    'city' => (string) ($r['teryt_name'] !== '' ? $r['teryt_name'] : $r['city']),
+                );
             }
         }
-        foreach ($lms_by_switch as $g) {
-            // Punkt tylko gdy przełącznik ma obie współrzędne.
-            if ($g['lat'] === null || $g['lng'] === null) {
-                continue;
+        $loc_lms_data = array('points' => array(), 'rows' => array());
+        foreach ($devices as $d) {
+            $cid = (int) ($d['customer_id'] ?? 0);
+            if ($cid <= 0) {
+                continue; // bez klienta LMS nie ma do czego przypiąć STB po stronie LMS
             }
-            $loc_lms_data['points'][] = array(
-                'lat' => $g['lat'], 'lng' => $g['lng'],
-                'label' => $g['switch'] !== '' ? $g['switch'] : $g['address'],
-                'count' => $g['count'], 'macs' => $g['macs'],
-                'switch' => $g['switch'], 'address' => $g['address'],
+            $m = strtolower($d['mac']);
+            $sw = $sw_by_mac[$m] ?? null; // bezpośredni MAC węzła, gdy jest
+            $gps = $gps_by_customer[$cid] ?? null;
+            $addr = $addr_by_customer[$cid] ?? null;
+            $loc_lms_data['rows'][] = array(
+                'mac' => $d['mac'], 'ip' => $d['ip'], 'customer_name' => $d['customer_name'],
+                'switch' => $gps['switch'] ?? ($sw['switch'] ?? ''),
+                'address' => $addr['address'] ?? ($sw['address'] ?? ''),
+                'teryt' => $addr['teryt'] ?? '',
+                'city' => $addr['city'] ?? '',
+                'lat' => $gps['lat'] ?? ($sw['lat'] ?? null),
+                'lng' => $gps['lng'] ?? ($sw['lng'] ?? null),
+                'errors' => $d['errors'],
             );
+            // Punkt per STB — tylko gdy mamy obie współrzędne (z node klienta albo z węzła po MAC).
+            $lat = $gps['lat'] ?? ($sw['lat'] ?? null);
+            $lng = $gps['lng'] ?? ($sw['lng'] ?? null);
+            if ($lat !== null && $lng !== null) {
+                $loc_lms_data['points'][] = array(
+                    'lat' => $lat, 'lng' => $lng,
+                    'label' => ($d['customer_name'] ?: $d['mac']) . ($addr['address'] ? ' — ' . $addr['address'] : ''),
+                    'count' => 1, 'macs' => array($d['mac']),
+                    'switch' => $gps['switch'] ?? ($sw['switch'] ?? ''),
+                    'address' => $addr['address'] ?? ($sw['address'] ?? ''),
+                );
+            }
         }
 
         // Widok LibreNMS: punkty = lokalizacje z GPS z getLocationsList (tylko gdy endpoint zwrócił dane),

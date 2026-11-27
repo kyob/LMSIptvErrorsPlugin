@@ -325,22 +325,23 @@
         <div class="iptv-tbl-wrap">
         <table class="table table-striped table-hover iptv-tbl" id="iptv-loc-lms">
             <thead><tr>
-                <th scope="col" class="lp">Lp.</th><th scope="col">MAC</th><th scope="col">IP</th><th scope="col">{trans('Klient')}</th><th scope="col">{trans('Przełącznik')}</th><th scope="col">{trans('Adres')}</th>
+                <th scope="col" class="lp">Lp.</th><th scope="col">MAC</th><th scope="col">IP</th><th scope="col">{trans('Klient')}</th><th scope="col">{trans('Przełącznik')}</th><th scope="col">{trans('Adres')}</th><th scope="col">TERYT</th>
                 <th scope="col" class="n">{trans('Błędy')}</th>
             </tr></thead>
             <tbody>
             {foreach $iptv.loc_lms.rows as $r}
-                <tr class="{if $r.errors >= 20}iptv-row-hi{elseif $r.errors >= 10}iptv-row-warn{/if}" data-n="{$r.errors}" data-s="{$r.mac|cat:' '|cat:$r.ip|cat:' '|cat:$r.customer_name|cat:' '|cat:$r.switch|cat:' '|cat:$r.address|lower|escape}">
+                <tr class="{if $r.errors >= 20}iptv-row-hi{elseif $r.errors >= 10}iptv-row-warn{/if}" data-n="{$r.errors}" data-s="{$r.mac|cat:' '|cat:$r.ip|cat:' '|cat:$r.customer_name|cat:' '|cat:$r.switch|cat:' '|cat:$r.address|cat:' '|cat:$r.teryt|lower|escape}">
                     <td class="lp">{$r@iteration}</td>
                     <td><code class="iptv-copy" data-copy="{$r.mac|escape}" title="{trans('Kopiuj MAC')|escape}" role="button" tabindex="0" aria-label="{trans('Kopiuj MAC')|escape}">{$r.mac|escape}</code></td>
                     <td><code>{$r.ip|escape}</code></td>
                     <td>{if $r.customer_name}{$r.customer_name|escape}{else}<span class="iptv-zero">—</span>{/if}</td>
                     <td>{if $r.switch}{$r.switch|escape}{else}<span class="iptv-zero">—</span>{/if}</td>
                     <td>{if $r.address}{$r.address|escape}{else}<span class="iptv-zero">—</span>{/if}</td>
+                    <td>{if $r.teryt}<code>{$r.teryt|escape}</code>{else}<span class="iptv-zero">—</span>{/if}</td>
                     <td class="n"><span class="iptv-chip {if $r.errors >= 10}hi{elseif $r.errors >= 3}mid{/if}">{$r.errors}</span></td>
                 </tr>
             {foreachelse}
-                <tr><td colspan="7" class="iptv-empty">{trans('Brak wierszy do wyświetlenia.')}</td></tr>
+                <tr><td colspan="8" class="iptv-empty">{trans('Brak wierszy do wyświetlenia.')}</td></tr>
             {/foreach}
             </tbody>
         </table>
