@@ -986,9 +986,11 @@ if ($data !== null) {
     // więc pętla po MAC-ach nie mnoży odczytów plików.
     $timelines = array();
     if ($mode === 'devices') {
-        foreach ($devices as $d) {
+        foreach ($devices as $i => $d) {
             $series = IptvTimeline::seriesForMac($client, $d['mac'], 24);
-            $timelines[strtoupper((string) $d['mac'])] = array(
+            // Timeline doklejamy bezpośrednio do wiersza — Smarty 4 nie lubi indeksowania
+            // $iptv.timelines[$d.mac] w {assign}/{if} inline.
+            $devices[$i]['tl'] = array(
                 'svg' => IptvTimeline::sparklineSvg($series),
                 'svg_big' => IptvTimeline::sparklineSvg($series, 480, 64),
                 'summary' => IptvTimeline::summary($series),
@@ -1257,7 +1259,6 @@ if ($data !== null) {
         'heavy_devices' => $heavy_devices,
         'total_spark' => $spark('total_errors', $data['total_errors']),
         'devices' => $devices,
-        'timelines' => $timelines,
         'emergency_candidates' => $candidates,
         'emergency_candidates_reason' => $H['emg_reason'] ?? '',
         // FEAT(diag): widok „customers" (klienci problematyczni) i „flaps" (eventlog portów LibreNMS).
