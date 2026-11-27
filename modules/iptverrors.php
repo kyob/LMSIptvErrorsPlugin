@@ -14,6 +14,7 @@
 
 require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvMetrics.php';
 require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvAlerts.php';
+require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvLibrenms.php';
 
 const IPTV_BASELINE_MIN_AGE = 1800; // porównanie z migawką starszą niż 30 min, najbliższą 1 h
 const IPTV_BASELINE_TARGET = 3600;
@@ -62,9 +63,9 @@ foreach ($iptv_side_actions as $iptv_side) {
 $iptv_force = $iptv_refresh;
 
 // Widok: pusty = podsumowanie dla NOC (jeden ekran), reszta to szczegóły.
-$mode = in_array($_GET['view'] ?? '', array('subnets', 'devices', 'streams', 'models', 'emg'), true) ? $_GET['view'] : '';
-// Ciężkie bloki (dekodery, kandydaci awarii) tylko tam, gdzie są pokazywane lub eksportowane do CSV.
-$heavy = in_array($mode, array('devices', 'emg'), true)
+$mode = in_array($_GET['view'] ?? '', array('subnets', 'devices', 'streams', 'models', 'emg', 'loc_lms', 'loc_lnms'), true) ? $_GET['view'] : '';
+// Ciężkie bloki (dekodery, kandydaci awarii, mapy korelacji) tylko tam, gdzie są pokazywane lub eksportowane do CSV.
+$heavy = in_array($mode, array('devices', 'emg', 'loc_lms', 'loc_lnms'), true)
     || ($iptv_action === 'csv' && in_array($iptv_table, array('devices', 'emg'), true));
 
 // UX: filtr q (MAC / nazwa / IP / klient) — szablon używa {$iptv.q}, wiersze mają pole search.
@@ -439,7 +440,10 @@ if ($data !== null) {
         return $out;
     };
 
-    // PERF: ciężki blok (zdarzenia → dekodery → kandydaci awarii) wykonujemy tylko dla view=devices/emg
+    // Klient LibreNMS współdzielony przez heavy block i $view (librenms_on) — konstruktor tylko czyta config, bez zapytań sieciowych.
+    $lnms = new IptvLibrenms();
+
+    // PERF: ciężki blok (zdarzenia → dekodery → kandydaci awarii → mapy korelacji) wykonujemy tylko dla view=devices/emg/loc_*
     // (i CSV t=devices/emg), a wynik cache'ujemy w pliku z TTL = iptv-errors.cache_ttl — nie przy każdym renderze.
     $iptv_heavy_file = STORAGE_DIR . DIRECTORY_SEPARATOR . 'iptv-errors' . DIRECTORY_SEPARATOR . 'heavy-cache.json';
     $heavy_cache = null;
@@ -619,6 +623,211 @@ if ($data !== null) {
                 : trans('API podaje tylko podsieć awaryjną (bez modeli). Kandydaci: wszyscy dekodery z SMS SGT w tej podsieci. To założenie, nie dane z API.');
         }
 
+        // FEAT: korelacja dekoderów z lokalizacją fizyczną. Kolejność źródeł (pierwsze niepuste wygrywa):
+        // 1) LibreNMS (tylko gdy enabled() — inaczej zero zapytań sieciowych),
+        // 2) przełącznik LMS (macs -> nodes.netdev -> netdevices),
+        // 3) adres klienta LMS (customer_id z SMS cust_number -> vaddresses).
+        // Wynik ląduje w polach location/location_source wierszy i leci razem z $H do heavy-cache.json.
+        $all_macs = array_values(array_unique(array_merge(
+            array_map('strtolower', array_column($devices, 'mac')),
+            array_map('strtolower', array_column($candidates, 'mac'))
+        )));
+        $macs_ok_all = array_values(array_filter($all_macs, function ($x) {
+            return preg_match('/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/', $x);
+        }));
+        // Batch: jedno wywołanie getLocationsForMacs dla wszystkich MAC-ów naraz (nie per wiersz w pętli).
+        $loc_lnms = array();
+        if ($lnms->enabled() && $macs_ok_all) {
+            $loc_lnms = $lnms->getLocationsForMacs($macs_ok_all, $iptv_force);
+        }
+        // Źródło 2: MAC -> węzeł -> netdev (przełącznik i jego lokalizacja/adres + współrzędne GPS do mapy loc_lms).
+        // SEC: bind IN ?, zero konkatenacji danych z zewnątrz do SQL.
+        $loc_switch = array();
+        $sw_by_mac = array();
+        if ($macs_ok_all) {
+            foreach ($DB->GetAll("SELECT lower(x.mac) AS mac, nd.name AS sw_name, nd.location AS sw_loc,
+                    nd.location_city, nd.location_street, nd.location_house, nd.location_flat,
+                    nd.longitude, nd.latitude
+                FROM macs x JOIN nodes n ON n.id = x.nodeid JOIN netdevices nd ON nd.id = n.netdev
+                WHERE lower(x.mac) IN ?", array($macs_ok_all)) ?: array() as $r) {
+                // Lokalizacja = nd.location + adres urządzenia (puste pola pomijamy).
+                $base = trim((string) $r['sw_loc']);
+                if ($base === '') {
+                    $base = trim((string) $r['sw_name']);
+                }
+                $street = trim((string) $r['location_street'] . ' ' . (string) $r['location_house']
+                    . ($r['location_flat'] !== null && (string) $r['location_flat'] !== '' ? '/' . (string) $r['location_flat'] : ''));
+                $parts = array_filter(array($base, trim((string) $r['location_city']), $street), function ($p) {
+                    return $p !== '';
+                });
+                $loc_switch[$r['mac']] = $parts ? implode(', ', $parts) : '';
+                // Współrzędne GPS przełącznika: puste/null w LMS = brak — wtedy null (bez punktu na mapie).
+                $sw_lat = $r['longitude'];
+                $sw_lng = $r['latitude'];
+                $sw_by_mac[$r['mac']] = array(
+                    'switch' => (string) $r['sw_name'],
+                    'address' => $loc_switch[$r['mac']],
+                    'lat' => ($sw_lat !== null && $sw_lat !== '' && is_numeric($sw_lat)) ? (float) $sw_lat : null,
+                    'lng' => ($sw_lng !== null && $sw_lng !== '' && is_numeric($sw_lng)) ? (float) $sw_lng : null,
+                );
+            }
+        }
+        // Źródło 3 (fallback): adres klienta LMS z vaddresses (pełny adres: ulica, kod + miasto).
+        // SEC: bind IN ? na intval'd id klientów.
+        $loc_customer = array();
+        $cust_ids = array_values(array_unique(array_filter(array_map('intval', array_merge(
+            array_column($devices, 'customer_id'),
+            array_column($candidates, 'customer_id')
+        )))));
+        if ($cust_ids) {
+            foreach ($DB->GetAll("SELECT customerid, address, city, zip FROM vaddresses WHERE customerid IN ?", array($cust_ids)) ?: array() as $r) {
+                $cid = (int) $r['customerid'];
+                $parts = array_filter(array(
+                    trim((string) $r['address']),
+                    trim(trim((string) $r['zip'] . ' ' . (string) $r['city'])),
+                ), function ($p) {
+                    return $p !== '';
+                });
+                // Przy wielu adresach klienta bierzemy pierwszy niepusty.
+                if (!isset($loc_customer[$cid]) || $loc_customer[$cid] === '') {
+                    $loc_customer[$cid] = $parts ? implode(', ', $parts) : '';
+                }
+            }
+        }
+        // Dopięcie lokalizacji do wierszy: pierwsze niepuste źródło wygrywa; location ląduje też w polu search (filtr q).
+        $apply_location = function (&$row) use ($loc_lnms, $loc_switch, $loc_customer) {
+            $m = strtolower((string) $row['mac']);
+            $row['location'] = '';
+            $row['location_source'] = null;
+            $l = $loc_lnms[$m] ?? null;
+            if ($l && ($l['location'] ?? '') !== '') {
+                $extra = trim(($l['switch'] ?? '') . ' ' . ($l['port'] ?? ''));
+                $row['location'] = $extra !== '' ? $l['location'] . ' (' . $extra . ')' : (string) $l['location'];
+                $row['location_source'] = 'librenms';
+            } elseif (!empty($loc_switch[$m])) {
+                $row['location'] = $loc_switch[$m];
+                $row['location_source'] = 'lms_switch';
+            } elseif (!empty($row['customer_id']) && !empty($loc_customer[(int) $row['customer_id']])) {
+                $row['location'] = $loc_customer[(int) $row['customer_id']];
+                $row['location_source'] = 'customer';
+            }
+            if ($row['location'] !== '') {
+                $row['search'] = trim($row['search'] . ' ' . mb_strtolower($row['location'], 'UTF-8'));
+            }
+        };
+        foreach ($devices as &$d) {
+            $apply_location($d);
+        }
+        unset($d);
+        foreach ($candidates as &$c) {
+            $apply_location($c);
+        }
+        unset($c);
+
+        // FEAT: widoki map korelacji adresowej (loc_lms / loc_lnms) — punkty do mapy + wiersze tabeli.
+        // Budowane tylko przy odbudowie $H (razem z location/location_source), stąd lecą do heavy-cache.json
+        // jako $H['loc_lms'] / $H['loc_lnms']; przy $H z cache bierzemy je stamtąd.
+        // Widok LMS: punkty = przełączniki LMS z niepustymi współrzędnymi (nd.longitude/latitude),
+        // count = liczba dekoderów z błędami podłączonych do tego switcha; wiersze = dekodery ze źródłem lms_switch.
+        $loc_lms_data = array('points' => array(), 'rows' => array());
+        $lms_by_switch = array();
+        foreach ($devices as $d) {
+            if (($d['location_source'] ?? '') !== 'lms_switch') {
+                continue;
+            }
+            $m = strtolower($d['mac']);
+            $sw = $sw_by_mac[$m] ?? null;
+            if ($sw === null) {
+                continue;
+            }
+            $loc_lms_data['rows'][] = array(
+                'mac' => $d['mac'], 'ip' => $d['ip'], 'customer_name' => $d['customer_name'],
+                'switch' => $sw['switch'], 'address' => $sw['address'],
+                'lat' => $sw['lat'], 'lng' => $sw['lng'], 'errors' => $d['errors'],
+            );
+            // Grupowanie po przełączniku (nazwa + adres), żeby jeden switch = jeden punkt na mapie.
+            $key = mb_strtolower($sw['switch'] . '|' . $sw['address'], 'UTF-8');
+            if (!isset($lms_by_switch[$key])) {
+                $lms_by_switch[$key] = array(
+                    'switch' => $sw['switch'], 'address' => $sw['address'],
+                    'lat' => $sw['lat'], 'lng' => $sw['lng'], 'count' => 0, 'macs' => array(),
+                );
+            }
+            if ($d['errors'] > 0) {
+                $lms_by_switch[$key]['count']++;
+                $lms_by_switch[$key]['macs'][] = $d['mac'];
+            }
+        }
+        foreach ($lms_by_switch as $g) {
+            // Punkt tylko gdy przełącznik ma obie współrzędne.
+            if ($g['lat'] === null || $g['lng'] === null) {
+                continue;
+            }
+            $loc_lms_data['points'][] = array(
+                'lat' => $g['lat'], 'lng' => $g['lng'],
+                'label' => $g['switch'] !== '' ? $g['switch'] : $g['address'],
+                'count' => $g['count'], 'macs' => $g['macs'],
+                'switch' => $g['switch'], 'address' => $g['address'],
+            );
+        }
+
+        // Widok LibreNMS: punkty = lokalizacje z GPS z getLocationsList (tylko gdy endpoint zwrócił dane),
+        // has_gps=false gdy null — wtedy sama tabela (wiersze), bez punktów. LibreNMS tylko gdy enabled().
+        // Wiersze = dekodery ze źródłem librenms; punkty agregują dekodery wg nazwy lokalizacji LibreNMS.
+        $loc_lnms_data = array('points' => array(), 'rows' => array(), 'has_gps' => false);
+        $lnms_locations = null;
+        if ($lnms->enabled()) {
+            $lnms_locations = $lnms->getLocationsList($iptv_force);
+        }
+        if (is_array($lnms_locations)) {
+            $loc_lnms_data['has_gps'] = true;
+        }
+        $lnms_by_location = array();
+        foreach ($devices as $d) {
+            if (($d['location_source'] ?? '') !== 'librenms') {
+                continue;
+            }
+            $m = strtolower($d['mac']);
+            $l = $loc_lnms[$m] ?? null;
+            if (!is_array($l)) {
+                continue;
+            }
+            $loc_name = (string) ($l['location'] ?? '');
+            $sw_name = trim((string) ($l['switch'] ?? ''));
+            $loc_lnms_data['rows'][] = array(
+                'mac' => $d['mac'], 'ip' => $d['ip'], 'customer_name' => $d['customer_name'],
+                'switch' => $sw_name, 'port' => (string) ($l['port'] ?? ''),
+                'location' => $loc_name, 'errors' => $d['errors'],
+            );
+            if ($loc_name === '') {
+                continue;
+            }
+            if (!isset($lnms_by_location[$loc_name])) {
+                $lnms_by_location[$loc_name] = array('count' => 0, 'macs' => array(), 'switches' => array());
+            }
+            if ($d['errors'] > 0) {
+                $lnms_by_location[$loc_name]['count']++;
+                $lnms_by_location[$loc_name]['macs'][] = $d['mac'];
+            }
+            if ($sw_name !== '' && !in_array($sw_name, $lnms_by_location[$loc_name]['switches'], true)) {
+                $lnms_by_location[$loc_name]['switches'][] = $sw_name;
+            }
+        }
+        // Punkty tylko dla lokalizacji, które mają współrzędne GPS w LibreNMS (i mają dekodery z błędami).
+        if (is_array($lnms_locations)) {
+            foreach ($lnms_by_location as $loc_name => $g) {
+                if (!isset($lnms_locations[$loc_name])) {
+                    continue;
+                }
+                $loc_lnms_data['points'][] = array(
+                    'lat' => (float) $lnms_locations[$loc_name]['lat'],
+                    'lng' => (float) $lnms_locations[$loc_name]['lng'],
+                    'label' => $loc_name, 'count' => $g['count'],
+                    'macs' => $g['macs'], 'switches' => $g['switches'],
+                );
+            }
+        }
+
         $broken_n = count(array_filter($devices, function ($d) {
             return $d['broken'];
         }));
@@ -641,6 +850,8 @@ if ($data !== null) {
             'candidates' => $candidates,
             'emg_reason' => $emg_reason,
             'hints_extra' => $hints_extra,
+            'loc_lms' => $loc_lms_data,
+            'loc_lnms' => $loc_lnms_data,
             'devices_events' => count($ev['events']),
             'devices_matched' => count(array_filter($devices, function ($d) {
                 return $d['customer_id'] !== null;
@@ -865,6 +1076,10 @@ if ($data !== null) {
         'devices' => $devices,
         'emergency_candidates' => $candidates,
         'emergency_candidates_reason' => $H['emg_reason'] ?? '',
+        // Mapy korelacji adresowej (kontrakt dla szablonu: $iptv.loc_lms.points/.rows, $iptv.loc_lnms.points/.rows/.has_gps).
+        'loc_lms' => $H['loc_lms'] ?? array('points' => array(), 'rows' => array()),
+        'loc_lnms' => $H['loc_lnms'] ?? array('points' => array(), 'rows' => array(), 'has_gps' => false),
+        'librenms_on' => $lnms->enabled(),
         'devices_events' => $H['devices_events'] ?? 0,
         'devices_count' => count($devices),
         'devices_matched' => $H['devices_matched'] ?? 0,
@@ -903,15 +1118,15 @@ if ($iptv_action === 'csv' && $data !== null) {
         return $d === null ? '' : $d;
     };
     if ($table === 'devices') {
-        $head = array('MAC', 'IP', 'Model', 'Serial', 'Podsieć', 'Błędy (max)', 'Zdarzeń', 'Grupy multicast', 'Ostatnio', 'Klient LMS', 'Nr SMS', 'Uszkodzony w SMS', 'Wartość odstająca');
+        $head = array('MAC', 'IP', 'Model', 'Serial', 'Podsieć', 'Lokalizacja', 'Błędy (max)', 'Zdarzeń', 'Grupy multicast', 'Ostatnio', 'Klient LMS', 'Nr SMS', 'Uszkodzony w SMS', 'Wartość odstająca');
         foreach ($view['devices'] as $r) {
-            $out_rows[] = array($r['mac'], $r['ip'], $r['model'], $r['serial'], $r['subnet'], $r['errors'], $r['events'], implode(' ', $r['groups']), $r['ts'] ? date('Y-m-d H:i:s', $r['ts']) : '', $r['customer_name'] ?? '', $r['sms_number'], $r['broken'] ? 'tak' : '', $r['anomaly'] ?: '');
+            $out_rows[] = array($r['mac'], $r['ip'], $r['model'], $r['serial'], $r['subnet'], $r['location'] ?? '', $r['errors'], $r['events'], implode(' ', $r['groups']), $r['ts'] ? date('Y-m-d H:i:s', $r['ts']) : '', $r['customer_name'] ?? '', $r['sms_number'], $r['broken'] ? 'tak' : '', $r['anomaly'] ?: '');
         }
     } elseif ($table === 'emg') {
         // FEAT: eksport CSV także dla widoku awarii (kandydaci).
-        $head = array('MAC', 'IP', 'Model', 'Serial', 'Podsieć', 'Błędy', 'Nr SMS', 'Uszkodzony w SMS', 'Klient LMS');
+        $head = array('MAC', 'IP', 'Model', 'Serial', 'Podsieć', 'Lokalizacja', 'Błędy', 'Nr SMS', 'Uszkodzony w SMS', 'Klient LMS');
         foreach ($view['emergency_candidates'] as $r) {
-            $out_rows[] = array($r['mac'], $r['ip'], $r['model'], $r['serial'], $r['subnet'], $r['errors'], $r['sms_number'], $r['broken'] ? 'tak' : '', $r['customer_name'] ?? '');
+            $out_rows[] = array($r['mac'], $r['ip'], $r['model'], $r['serial'], $r['subnet'], $r['location'] ?? '', $r['errors'], $r['sms_number'], $r['broken'] ? 'tak' : '', $r['customer_name'] ?? '');
         }
     } elseif ($table === 'streams') {
         $head = array('Grupa', 'Błędy', 'Zmiana (Δ)');

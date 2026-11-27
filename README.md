@@ -57,6 +57,10 @@ Nie wpisuj klucza API do plików w katalogu pluginu — katalog `plugins/` leży
 | `cache_ttl` | cache metryk i zdarzeń, s | `30` |
 | `history_interval` | odstęp migawek historii, s | `300` |
 | `stb_cache_ttl` | cache listy dekoderów z SMS SGT, s | `600` |
+| `librenms_enabled` | włącza lokalizację dekoderów przez LibreNMS (domyślnie wyłączone — nie każdy ma LibreNMS) | `false` |
+| `librenms_url` | baza adresu REST API v0 LibreNMS | `https://librenms.alfa-system.net/api/v0` |
+| `librenms_api_token` | token API LibreNMS, nagłówek `X-Auth-Token` (ustaw ręcznie, nie ma w pliku ini) | brak |
+| `librenms_cache_ttl` | cache odpowiedzi LibreNMS per MAC, s | `600` |
 | `alert_threshold_*` | progi alarmów (patrz [Progi alarmów](#progi-alarmów)) | wartości z tabeli niżej |
 
 ## Co pokazuje strona
@@ -74,10 +78,12 @@ Pierwszy ekran to podsumowanie dla NOC. Zakładki u góry przełączają widoki 
 | `view` | Zawartość |
 |---|---|
 | `subnets` | podsieci: błędy, awarie, Δ, wykres 24 h |
-| `devices` | dekodery z ostatnich zdarzeń: MAC, IP, model, serial (link do SMS), podsieć, błędy, grupy, klient LMS (link), numer SMS |
+| `devices` | dekodery z ostatnich zdarzeń: MAC, IP, model, serial (link do SMS), podsieć, **lokalizacja** (LibreNMS → LMS → adres klienta), błędy, grupy, klient LMS (link), numer SMS |
 | `streams` | grupy multicast (15 największych, przycisk pokazuje wszystkie) |
 | `models` | modele: błędy, udział, stawka błędów (błędy / zarejestrowane w SMS), awarie, Δ |
 | `emg` | kandydaci na dekoder w stanie awaryjnym |
+| `loc_lms` | mapa + tabela korelacji dekoderów z przełącznikami LMS (`netdevices`: nazwa, adres, GPS) |
+| `loc_lnms` | mapa + tabela korelacji dekoderów z lokalizacjami LibreNMS (wymaga `librenms_enabled=1`; mapa tylko gdy API udostępnia `/locations` z GPS) |
 
 Narzędzia na każdym widoku: filtr tekstowy (`q` w URL), „Tylko z błędami”, auto-odświeżanie co 60 s, przycisk Odśwież, CSV przy tabelach, link do SMS SGT.
 
@@ -107,6 +113,9 @@ Uwagi:
 1. **API SGT** `GET {url}` — OpenMetrics: `device_errors`, `device_emergency`, `subnet_errors`, `subnet_emergency`, `stream_errors`.
 2. **API SGT** `GET {errors_url}` — ostatnie ~200 zdarzeń per dekoder (MAC, IP, model, grupa, `errors`, czas). Endpoint nieudokumentowany u SGT; znaczenie `errors` to założenie.
 3. **SMS SGT** przez `LMSJamboxPlugin` (XML-RPC `stbGetRegistered`, tylko odczyt): MAC → numer klienta SMS → klient LMS przez `customers.tv_cust_number`. Cache 10 min (`stb_cache_ttl`).
+4. **LibreNMS REST API v0** (opcjonalnie, `librenms_enabled=1`): `GET /ports?mac={mac}` (FDB) → port dostępowy → `GET /devices/{id}` → hostname przełącznika + `location`. Lokalizacja dekodera = lokalizacja przełącznika, do którego jest podłączony. Bez flagi żadne zapytanie nie jest wykonywane. Cache per MAC (`librenms_cache_ttl`).
+
+Lokalizacja dekodera w widoku `devices` (pierwsze niepuste źródło): LibreNMS (przełącznik + port) → LMS `macs → nodes.netdev → netdevices.location` → adres klienta LMS.
 
 ## Pliki robocze
 
@@ -117,6 +126,8 @@ Katalog `storage/iptv-errors/` tworzy plugin, zapisuje użytkownik WWW, prawa 06
 | `cache.json` | ostatnia odpowiedź metryk |
 | `events.json` | ostatnie zdarzenia per dekoder (MAC) |
 | `stb.json` | dekodery z SMS SGT (MAC, numery klientów) |
+| `librenms.json` | cache lokalizacji per MAC z LibreNMS |
+| `fail-librenms.json` | backoff po błędzie API LibreNMS |
 | `history.json` | migawki 24 h (co 5 min) |
 | `history.lock` | blokada zapisu historii |
 | `fail-<źródło>.json` | ostatni błąd źródła; przez 90 s plugin go nie pyta ponownie |
