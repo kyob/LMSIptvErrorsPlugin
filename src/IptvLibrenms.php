@@ -27,7 +27,8 @@ class IptvLibrenms
     const MAX_RESPONSE_BYTES = 1048576; // 1 MB na jedno zapytanie
     const CONCURRENCY = 10; // ile równoległych requestów do API LibreNMS w batchu (curl_multi)
     // Nazwy portów agregujących/uplink — nie wskazują fizycznej lokalizacji klienta.
-    const UPLINK_PATTERN = '/^(ethernet\s*1\/0\/1$|eth\s*1\/0\/\d+$|10ge|xe-|ge-|port-channel|po\d|vlan\d|loopback|mgmt|management)/i';
+    // Uwaga: eth1/0/N i Ethernet1/0/N to porty DOSTĘPOWE (D-Link DGS-1510, Huawei) — nie są uplinkiem!
+    const UPLINK_PATTERN = '/^(port-channel|po\d+|vlan\d+|loopback|lo\d*|mgmt|management|10ge|xe-|uplink)/i';
 
     private $enabled;
     private $url;
