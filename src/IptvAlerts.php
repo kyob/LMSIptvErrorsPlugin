@@ -31,9 +31,11 @@ class IptvAlerts
     private static $thresholds = array();
 
     /**
-     * Próg alarmu z uiconfig (sekcja iptv-errors), keszowany w ramach jednego requestu.
+     * Próg alarmu z uiconfig (sekcja iptv-errors, klucze iptv-errors.alert_threshold_*),
+     * keszowany w ramach jednego requestu. Publiczne — moduł (modules/iptverrors.php)
+     * używa go też poza klasą, żeby nadpisania z uiconfig były respektowane wszędzie.
      */
-    private static function threshold($name, $default)
+    public static function threshold($name, $default)
     {
         if (!array_key_exists($name, self::$thresholds)) {
             self::$thresholds[$name] = (int) ConfigHelper::getConfig('iptv-errors.alert_threshold_' . $name, $default);
@@ -183,18 +185,6 @@ class IptvAlerts
             return [(int) $b['persisted'], $b['errors']] <=> [(int) $a['persisted'], $a['errors']];
         });
         return $out;
-    }
-
-    /**
-     * Szereg czasowy błędów jednego dekodera (MAC) prosto z historii migawek:
-     * lista ['t' => ts, 'errors' => n]. Migawki bez 'devices_top' (stary format)
-     * są pomijane — brak danych, nie zero. Dekoder poza top 100 ma errors = 0.
-     *
-     * @return array lista ['t' => int, 'errors' => int]
-     */
-    public static function deviceSeries(array $history, $mac, $now, $hours = 24)
-    {
-        return IptvMetrics::deviceSeriesFromHistory($history, $mac, $now, $hours);
     }
 
     /**

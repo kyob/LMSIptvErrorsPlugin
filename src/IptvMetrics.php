@@ -229,7 +229,7 @@ class IptvMetrics
         return strtolower(str_replace('-', ':', trim((string) $mac)));
     }
 
-    private function fetch($url = null)
+    protected function fetch($url = null)
     {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('Brak rozszerzenia PHP curl');
@@ -351,18 +351,6 @@ class IptvMetrics
             $f['stream:' . $k] = $v;
         }
         return array_filter($f);
-    }
-
-    /**
-     * Zmiana wartości klucza względem migawki bazowej. Null, gdy klucz jest nowy
-     * (brak go w bazie) — UI pokazuje „nowa” zamiast udawać skok od zera.
-     */
-    public static function delta($baseline, $key, $value)
-    {
-        if (!is_array($baseline) || !array_key_exists($key, $baseline['v'] ?? array())) {
-            return null;
-        }
-        return (int) $value - (int) $baseline['v'][$key];
     }
 
     public function history()

@@ -66,24 +66,6 @@ class IptvDod
     }
 
     /**
-     * Porównanie wielu kluczy naraz (do tabel podsieci/grup/streamów):
-     * klucz => wynik compare().
-     *
-     * @param array $history migawki z IptvMetrics::history()
-     * @param array $keys lista kluczy płaskiej mapy
-     * @param int $now timestamp „teraz”
-     * @return array klucz => ['now'=>int, 'yesterday'=>int|null, 'delta'=>int|null, 'pct'=>float|null]
-     */
-    public static function compareAll(array $history, array $keys, $now)
-    {
-        $out = array();
-        foreach ($keys as $key) {
-            $out[$key] = self::compare($history, $key, $now);
-        }
-        return $out;
-    }
-
-    /**
      * Migawka najbliższa $now - 24 h w oknie 23-25 h wstecz; null, gdy w oknie
      * nie ma żadnej migawki (świeża instalacja, historia < 24 h).
      *

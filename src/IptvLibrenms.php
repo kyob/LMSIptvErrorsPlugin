@@ -1087,7 +1087,7 @@ class IptvLibrenms
         return $out;
     }
 
-    private function fetchJson($url)
+    protected function fetchJson($url)
     {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('Brak rozszerzenia PHP curl');
