@@ -388,13 +388,14 @@
 
 {if $iptv.mode == 'loc_lms' || $iptv.mode == 'loc_lnms'}
 <script>
+{literal}
 (function () {
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
         });
     }
-    function initIptvMap(containerId, emptyMsg) {
+    window.initIptvMap = function (containerId, emptyMsg, errorsLabel) {
         var el = document.getElementById(containerId);
         if (!el || typeof L === 'undefined') { return; }
         var points = [];
@@ -410,7 +411,7 @@
             var lat = parseFloat(p.lat), lng = parseFloat(p.lng);
             if (isNaN(lat) || isNaN(lng)) { return; }
             var macs = (Array.isArray(p.macs) ? p.macs : []).map(function (m) { return '<code>' + esc(m) + '</code>'; }).join('<br>');
-            var html = '<strong>' + esc(p.label) + '</strong><br>{trans('Dekodery z błędami')|escape:'javascript'}: <strong>' + parseInt(p.count, 10) + '</strong>'
+            var html = '<strong>' + esc(p.label) + '</strong><br>' + esc(errorsLabel) + ': <strong>' + parseInt(p.count, 10) + '</strong>'
                 + (macs ? '<br>' + macs : '');
             L.marker([lat, lng]).addTo(map).bindPopup(html);
             bounds.push([lat, lng]);
@@ -420,15 +421,16 @@
             return;
         }
         map.fitBounds(bounds, { padding: [30, 30] });
-    }
-    {if $iptv.mode == 'loc_lms'}
-    initIptvMap('iptv-map-lms', '{trans('Brak punktów z współrzędnymi')|escape:'javascript'}');
-    {/if}
-    {if $iptv.mode == 'loc_lnms' && $iptv.loc_lnms.has_gps}
-    initIptvMap('iptv-map-lnms', '{trans('Brak punktów z współrzędnymi')|escape:'javascript'}');
-    {/if}
+    };
 })();
+{/literal}
 </script>
+{if $iptv.mode == 'loc_lms'}
+<script>window.initIptvMap('iptv-map-lms', '{trans('Brak punktów z współrzędnymi')|escape:'javascript'}', '{trans('Dekodery z błędami')|escape:'javascript'}');</script>
+{/if}
+{if $iptv.mode == 'loc_lnms' && $iptv.loc_lnms.has_gps}
+<script>window.initIptvMap('iptv-map-lnms', '{trans('Brak punktów z współrzędnymi')|escape:'javascript'}', '{trans('Dekodery z błędami')|escape:'javascript'}');</script>
+{/if}
 {/if}
 
 {/block}
