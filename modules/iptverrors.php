@@ -808,7 +808,7 @@ if ($data !== null) {
                 $loc_lms_data['points'][] = array(
                     'lat' => $lat, 'lng' => $lng,
                     'label' => ($d['customer_name'] ?: $d['mac']) . ($addr['address'] ? ' — ' . $addr['address'] : ''),
-                    'count' => 1, 'macs' => array($d['mac']),
+                    'count' => (int) $d['errors'], 'macs' => array($d['mac']),
                     'switch' => $gps['switch'] ?? ($sw['switch'] ?? ''),
                     'address' => $addr['address'] ?? ($sw['address'] ?? ''),
                 );
@@ -848,8 +848,9 @@ if ($data !== null) {
             if (!isset($lnms_by_location[$loc_name])) {
                 $lnms_by_location[$loc_name] = array('count' => 0, 'macs' => array(), 'switches' => array());
             }
+            // count = suma błędów dekoderów w tej lokalizacji (kolor/rozmiar punktu na mapie).
+            $lnms_by_location[$loc_name]['count'] += (int) $d['errors'];
             if ($d['errors'] > 0) {
-                $lnms_by_location[$loc_name]['count']++;
                 $lnms_by_location[$loc_name]['macs'][] = $d['mac'];
             }
             if ($sw_name !== '' && !in_array($sw_name, $lnms_by_location[$loc_name]['switches'], true)) {
