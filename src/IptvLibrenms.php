@@ -189,8 +189,8 @@ class IptvLibrenms
             $location = (string) ($chosen['device']['location'] ?? '');
             $port = (string) ($chosen['ifName'] ?? $chosen['ifDescr'] ?? ($chosen['port']['ifName'] ?? ''));
             if ($did > 0 && isset($devRes[$did])) {
-                // Doprecyzowanie z /devices/{id}: location to nazwa lokalizacji (string), sysLocation fallback.
-                $dev = $devRes[$did]['data'] ?? $devRes[$did];
+                // /devices/{id} zwraca {"status":"ok","devices":[{...}]} — pierwszy element listy.
+                $dev = $devRes[$did]['devices'][0] ?? ($devRes[$did]['data'] ?? $devRes[$did]);
                 if (is_array($dev)) {
                     if ($switch === '') {
                         $switch = (string) ($dev['hostname'] ?? '');
