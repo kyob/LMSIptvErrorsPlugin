@@ -126,7 +126,8 @@ class IptvLibrenms
     {
         $portUrls = array();
         foreach ($macs as $m) {
-            $portUrls[$m] = $this->url . '/ports?mac=' . urlencode($m);
+            // API LibreNMS filtruje FDB po formacie z bazy: czysty hex bez separatorów (ports_fdb.mac_address).
+            $portUrls[$m] = $this->url . '/ports?mac=' . urlencode(str_replace(':', '', $m));
         }
         $portRes = $this->fetchJsonMulti($portUrls);
         // Zbierz wybrane porty per MAC + unikalne device_id do pobrania.
