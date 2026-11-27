@@ -265,7 +265,8 @@ class IptvLibrenms
                 }
                 $k = $handles[$id]['key'];
                 $body = curl_multi_getcontent($ch);
-                $code = (int) $info['http_code'];
+                // curl_multi_info_read NIE zwraca http_code — kod bierzemy z uchwytu po zakończeniu.
+                $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
                 $err = curl_error($ch);
                 curl_multi_remove_handle($mh, $ch);
                 curl_close($ch);
