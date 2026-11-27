@@ -62,6 +62,13 @@ if (!file_exists($composer_autoload_path)) {
 }
 require_once $composer_autoload_path;
 
+try {
+    $DB = LMSDB::getInstance();
+} catch (Exception $ex) {
+    fwrite(STDERR, 'Database error: ' . $ex->getMessage() . PHP_EOL);
+    exit(1);
+}
+
 require_once LIB_DIR . DIRECTORY_SEPARATOR . 'common.php';
 require_once LIB_DIR . DIRECTORY_SEPARATOR . 'language.php';
 include_once LIB_DIR . DIRECTORY_SEPARATOR . 'definitions.php';
