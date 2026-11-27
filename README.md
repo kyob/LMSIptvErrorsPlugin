@@ -83,9 +83,35 @@ Pierwszy ekran to podsumowanie dla NOC. Zakładki u góry przełączają widoki 
 | `models` | modele: błędy, udział, stawka błędów (błędy / zarejestrowane w SMS), awarie, Δ |
 | `emg` | kandydaci na dekoder w stanie awaryjnym |
 | `loc_lms` | mapa + tabela korelacji dekoderów z przełącznikami LMS (`netdevices`: nazwa, adres, GPS) |
-| `loc_lnms` | mapa + tabela korelacji dekoderów z lokalizacjami LibreNMS (wymaga `librenms_enabled=1`; mapa tylko gdy API udostępnia `/locations` z GPS) |
+| `loc_lnms` | mapa + tabela korelacji dekoderów z lokalizacjami LibreNMS (wymaga `librenms_enabled=1`; mapa tylko gdy API udostępnia `/locations` z GPS). Dodatkowe kolumny per STB: błędy portu (ifInErrors+ifOutErrors), flapy portu 24 h, ostatni link up/down z syslog, plakietka FDB×>1 gdy MAC jest na więcej niż jednym porcie/switchu |
+| `ports` | diagnostyka port-level z LibreNMS (wymaga `librenms_enabled=1`): tabela problematycznych portów na switchach z dekoderami w błędach — patrz [Widok „Porty”](#widok-porty) |
 
 Narzędzia na każdym widoku: filtr tekstowy (`q` w URL), „Tylko z błędami”, auto-odświeżanie co 60 s, przycisk Odśwież, CSV przy tabelach, link do SMS SGT.
+
+## Widok „Porty” (diagnostyka port-level z LibreNMS)
+
+Zakładka **Porty** (`?m=iptverrors&view=ports`, widoczna tylko gdy `librenms_enabled=1`) pokazuje porty
+problematyczne na switchach, do których są podłączone dekodery z błędami (FDB LibreNMS): liczniki
+`ifInErrors`/`ifOutErrors`, flapy z eventlog (24 h / 7 d), status operacyjny, speed/duplex, `ifLastChange`,
+ ostatni link up/down z syslog i liczba STB na porcie. Port „problematyczny” = ma błędy liczników, flapy
+w 7 d albo jest admin-up/oper-down. W widoku `loc_lnms` te same dane są kolumnami per wiersz STB
+(join MAC → FDB → port → statystyki); grupowanie `?group=switch|subnet|location` działa tam jak wcześniej.
+
+Wymagane configy (sekcja `iptv-errors`): `librenms_enabled=1`, `librenms_url`, `librenms_api_token`
+(nagłówek `X-Auth-Token`), `librenms_cache_ttl` (cache odpowiedzi, domyślnie 600 s).
+
+Źródła (wszystkie tylko przez API v0, tylko odczyt):
+
+- `GET /devices/{hostname}/ports?columns=ifName,ifOperStatus,ifAdminStatus,ifSpeed,ifDuplex,ifType,ifMtu,ifAlias,ifInErrors,ifOutErrors,ifInUcastPkts,ifOutUcastPkts,ifInOctets,ifOutOctets,ifLastChange,poll_time` — UWAGA: `/ports?device_id=` NIE filtruje, używamy tylko ścieżki per hostname; nieprawidłowe kolumny (`ifHC*`, `ifDiscards`, …) zwracają „Invalid columns”.
+- `GET /logs/eventlog/{hostname}?from=...&limit=5000&type=interface` — flapy (reference = port_id).
+- `GET /logs/syslog?device_id={id}&from=...&count=2000` — filtr per urządzenie działa po **`device_id`**
+  (ścieżka `/logs/syslog/{hostname}` zwraca pusto). `device_id` bierzemy z cache statystyk portów lub
+  z `GET /devices/{hostname}`. Komunikaty parsujemy typu „Port 1:22 link up, 1000Mbps FULL duplex”;
+  dopasowanie portu syslog ↔ ifName jest best-effort (po numerach portu, np. „1:22” ↔ „eth1/0/22”).
+- `GET /resources/fdb/{mac}/detail` — FDB per MAC; MAC na >1 porcie/switchu = plakietka FDB×>1.
+
+Cache w `storage/iptv-errors/`: `librenms-portstats.json`, `librenms-flaps.json`, `librenms-syslog.json`,
+`librenms-fdb.json` (TTL `librenms_cache_ttl`, backoff `fail-librenms.json` jak dla lokalizacji per MAC).
 
 ## Progi alarmów
 
@@ -123,9 +149,15 @@ Lokalizacja dekodera w widoku `devices` (pierwsze niepuste źródło): LibreNMS 
 sudo -u apache php plugins/LMSIptvErrorsPlugin/bin/lms-iptv-errors-test-librenms.php -C /etc/lms/lms.ini
 # pojedynczy MAC:  --mac=00:1a:79:5b:d1:1d
 # wszystkie MAC-i z events.json:  --all
+# test port-level lokalnie, bez LMS/DB i sieci (fixture HTTP):  --mock
 ```
 
 Bierze MAC-i dekoderów z błędami (`storage/iptv-errors/events.json`) i wypisuje `switch | port | lokalizacja` per MAC. Exit 0 gdy choć jeden MAC ma lokalizację, 2 gdy wszystkie `null`, 1 gdy LibreNMS wyłączone (`librenms_enabled`). Wynik na test-lms26: 25/25 w 0.5 s.
+
+Dodatkowo testuje metody port-level (`getPortStatsForDevices`, `getPortFlaps`, `getPortSyslog`,
+`getFdbDetailForMacs`) — w trybie rzeczywistym na hostách z cache `librenms.json` (max 3), w trybie
+`--mock` na fixture'ach (20 asercji: struktura wyników, parsowanie syslog, flapy 24 h/7 d, FDB multi,
+cache bez force = 0 wywołań HTTP). Exit 3 gdy któraś asercja zwróci FAIL.
 
 ## Pliki robocze
 
@@ -137,6 +169,10 @@ Katalog `storage/iptv-errors/` tworzy plugin, zapisuje użytkownik WWW, prawa 06
 | `events.json` | ostatnie zdarzenia per dekoder (MAC) |
 | `stb.json` | dekodery z SMS SGT (MAC, numery klientów) |
 | `librenms.json` | cache lokalizacji per MAC z LibreNMS |
+| `librenms-portstats.json` | cache statystyk portów per switch (`/devices/{hostname}/ports`) |
+| `librenms-flaps.json` | cache surowych zdarzeń eventlog per switch (flapy 24 h/7 d) |
+| `librenms-syslog.json` | cache sparsowanych link up/down z syslog per switch (`device_id`) |
+| `librenms-fdb.json` | cache FDB per MAC (`/resources/fdb/{mac}/detail`, flaga multi) |
 | `fail-librenms.json` | backoff po błędzie API LibreNMS |
 | `history.json` | migawki 24 h (co 5 min) |
 | `history.lock` | blokada zapisu historii |

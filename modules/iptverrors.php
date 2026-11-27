@@ -66,9 +66,9 @@ foreach ($iptv_side_actions as $iptv_side) {
 $iptv_force = $iptv_refresh;
 
 // Widok: pusty = podsumowanie dla NOC (jeden ekran), reszta to szczegóły.
-$mode = in_array($_GET['view'] ?? '', array('subnets', 'devices', 'streams', 'models', 'emg', 'loc_lms', 'loc_lnms', 'customers', 'flaps'), true) ? $_GET['view'] : '';
-// Ciężkie bloki (dekodery, kandydaci awarii, mapy korelacji, klienci, flapy) tylko tam, gdzie są pokazywane lub eksportowane do CSV.
-$heavy = in_array($mode, array('devices', 'emg', 'loc_lms', 'loc_lnms', 'customers', 'flaps'), true)
+$mode = in_array($_GET['view'] ?? '', array('subnets', 'devices', 'streams', 'models', 'emg', 'loc_lms', 'loc_lnms', 'customers', 'flaps', 'ports'), true) ? $_GET['view'] : '';
+// Ciężkie bloki (dekodery, kandydaci awarii, mapy korelacji, klienci, flapy, porty) tylko tam, gdzie są pokazywane lub eksportowane do CSV.
+$heavy = in_array($mode, array('devices', 'emg', 'loc_lms', 'loc_lnms', 'customers', 'flaps', 'ports'), true)
     || ($iptv_action === 'csv' && in_array($iptv_table, array('devices', 'emg'), true));
 
 // UX: filtr q (MAC / nazwa / IP / klient) — szablon używa {$iptv.q}, wiersze mają pole search.
@@ -925,6 +925,186 @@ if ($data !== null) {
             }
         }
 
+        // FEAT(port-level): diagnostyka portów LibreNMS — statystyki portów, flapy 24 h/7 d, syslog link
+        // up/down, FDB per MAC. Hosty = switche, do których podłączone są dekodery z błędami (FDB LibreNMS).
+        $ports_rows = array();
+        $portstats = array();
+        $flaps_by_host = array(24 => array(), 168 => array());
+        $syslog_by_host = array();
+        $fdb_by_mac = array();
+        if ($lnms->enabled()) {
+            $port_hosts = array();
+            foreach ($loc_lnms_data['rows'] as $r) {
+                $sw = mb_strtolower(trim((string) ($r['switch'] ?? '')));
+                if ($sw !== '') {
+                    $port_hosts[$sw] = true;
+                }
+            }
+            $port_hosts = array_keys($port_hosts);
+            if ($port_hosts) {
+                $portstats = $lnms->getPortStatsForDevices($port_hosts, $iptv_force);
+                $flaps_by_host = array(
+                    24 => $lnms->getPortFlaps($port_hosts, 24, $iptv_force),
+                    168 => $lnms->getPortFlaps($port_hosts, 168, $iptv_force),
+                );
+                $syslog_by_host = $lnms->getPortSyslog($port_hosts, 24, $iptv_force);
+                if ($macs_ok_all) {
+                    $fdb_by_mac = $lnms->getFdbDetailForMacs($macs_ok_all, $iptv_force);
+                }
+            }
+        }
+        // Indeksy do joinu: host|ifName => stats, host|port_id|okno => liczba flapów.
+        $stats_idx = array();
+        $flaps_idx = array();
+        $stb_on_port = array();
+        foreach ($loc_lnms_data['rows'] as $r) {
+            $k = mb_strtolower((string) ($r['switch'] ?? '')) . '|' . mb_strtolower((string) ($r['port'] ?? ''));
+            $stb_on_port[$k] = ($stb_on_port[$k] ?? 0) + 1;
+        }
+        foreach ($portstats as $host => $st) {
+            if (!is_array($st) || !isset($st['ports']) || !is_array($st['ports'])) {
+                continue;
+            }
+            foreach ($st['ports'] as $p) {
+                $p['host'] = $host;
+                $stats_idx[$host . '|' . mb_strtolower((string) $p['ifName'])] = $p;
+            }
+            foreach (array(24, 168) as $h) {
+                $fl = $flaps_by_host[$h][$host]['by_port'] ?? array();
+                foreach ($fl as $pid => $agg) {
+                    $flaps_idx[$host . '|' . (int) $pid . '|' . $h] = (int) $agg['count'];
+                }
+            }
+        }
+        // Indeks syslog: host => wszystkie sufiksy znormalizowanego portu (np. "1.22" i "22"),
+        // żeby best-effort dopiąć "Port 1:22" z sysloga do ifName typu "eth1/0/22".
+        $port_key = function ($s) {
+            return trim((string) preg_replace('/[^0-9]+/', '.', mb_strtolower(trim((string) $s))), '.');
+        };
+        $syslog_idx = array(); // 'host|suffix' => ostatni event
+        foreach ($syslog_by_host as $host => $sl) {
+            if (!is_array($sl) || !isset($sl['events']) || !is_array($sl['events'])) {
+                continue;
+            }
+            foreach ($sl['events'] as $ev) {
+                $pk = $port_key($ev['port'] ?? '');
+                if ($pk === '') {
+                    continue;
+                }
+                $groups = explode('.', $pk);
+                $n = count($groups);
+                for ($i = 0; $i < $n; $i++) {
+                    $k = $host . '|' . implode('.', array_slice($groups, $i));
+                    if (!isset($syslog_idx[$k]) || (int) $ev['ts'] > (int) ($syslog_idx[$k]['ts'] ?? 0)) {
+                        $syslog_idx[$k] = $ev;
+                    }
+                }
+            }
+        }
+        // Ostatni link event dla portu: dokładny klucz ifName, potem sufiksy (2 grupy, 1 grupa).
+        $syslog_for_port = function ($host, $ifName) use ($syslog_idx, $port_key) {
+            $a = $port_key($ifName);
+            if ($a === '') {
+                return null;
+            }
+            $ag = explode('.', $a);
+            $cands = array($a);
+            if (count($ag) >= 2) {
+                $cands[] = implode('.', array_slice($ag, -2));
+            }
+            $cands[] = end($ag);
+            foreach ($cands as $suffix) {
+                $k = $host . '|' . $suffix;
+                if (isset($syslog_idx[$k])) {
+                    return $syslog_idx[$k];
+                }
+            }
+            return null;
+        };
+        $link_txt = function ($lk) {
+            if (!$lk) {
+                return '';
+            }
+            $t = $lk['port'] . ' ' . $lk['state'];
+            if (!empty($lk['speed'])) {
+                $t .= ', ' . (int) $lk['speed'] . 'Mbps';
+            }
+            if (!empty($lk['duplex'])) {
+                $t .= ' ' . $lk['duplex'];
+            }
+            return $t;
+        };
+        $speed_txt = function ($bps) {
+            $bps = (int) $bps;
+            if ($bps >= 1000000000) {
+                return round($bps / 1000000000) . ' Gbps';
+            }
+            if ($bps >= 1000000) {
+                return round($bps / 1000000) . ' Mbps';
+            }
+            if ($bps > 0) {
+                return round($bps / 1000) . ' kbps';
+            }
+            return '';
+        };
+        // Wiersze widoku „Porty”: tylko porty problematyczne (błędy liczników, flapy 7 d, albo admin-up/oper-down).
+        foreach ($stats_idx as $p) {
+            $host = (string) $p['host'];
+            $ifn = (string) $p['ifName'];
+            $in_e = (int) $p['in_errors'];
+            $out_e = (int) $p['out_errors'];
+            $pid = (int) $p['port_id'];
+            $fl24 = (int) ($flaps_idx[$host . '|' . $pid . '|24'] ?? 0);
+            $fl7 = (int) ($flaps_idx[$host . '|' . $pid . '|168'] ?? 0);
+            $oper = (string) $p['oper'];
+            $admin = (string) $p['admin'];
+            $problem = ($in_e + $out_e) > 0 || $fl7 > 0 || ($admin === 'up' && $oper !== '' && $oper !== 'up');
+            if (!$problem) {
+                continue;
+            }
+            $lk = $syslog_for_port($host, $ifn);
+            $ports_rows[] = array(
+                'switch' => $host,
+                'port' => $ifn,
+                'alias' => (string) $p['alias'],
+                'oper' => $oper,
+                'admin' => $admin,
+                'speed_txt' => $speed_txt($p['speed']),
+                'duplex' => (string) $p['duplex'],
+                // płaskie pole dla Smarty 4.6 (brak zagnieżdżonych inline {if} w szablonie)
+                'speed_duplex' => trim($speed_txt($p['speed']) . ($p['duplex'] !== '' ? ' ' . $p['duplex'] : '')),
+                'in_errors' => $in_e,
+                'out_errors' => $out_e,
+                'errors' => $in_e + $out_e,
+                'flaps_24h' => $fl24,
+                'flaps_7d' => $fl7,
+                'last_change' => (string) $p['last_change'],
+                'last_link_ts' => $lk ? (int) $lk['ts'] : 0,
+                'last_link_txt' => $link_txt($lk),
+                'stb' => (int) ($stb_on_port[$host . '|' . mb_strtolower($ifn)] ?? 0),
+                'search' => mb_strtolower($host . ' ' . $ifn . ' ' . $p['alias'] . ' ' . $oper . ($lk ? ' ' . ($lk['msg'] ?? '') : ''), 'UTF-8'),
+            );
+        }
+        usort($ports_rows, function ($a, $b) {
+            return [$b['errors'], $b['flaps_7d']] <=> [$a['errors'], $a['flaps_7d']]
+                ?: strcmp($a['switch'] . ' ' . $a['port'], $b['switch'] . ' ' . $b['port']);
+        });
+        // Kolumny port-level per wiersz STB w loc_lnms: join MAC -> FDB -> port -> stats/flapy/syslog.
+        foreach ($loc_lnms_data['rows'] as $i => $r) {
+            $host = mb_strtolower((string) ($r['switch'] ?? ''));
+            $ifn = mb_strtolower((string) ($r['port'] ?? ''));
+            $p = $stats_idx[$host . '|' . $ifn] ?? null;
+            $pid = $p ? (int) $p['port_id'] : 0;
+            $lk = $p ? $syslog_for_port($host, (string) $p['ifName']) : null;
+            $fdb = $fdb_by_mac[strtolower((string) $r['mac'])] ?? null;
+            $loc_lnms_data['rows'][$i]['port_errors'] = $p ? (int) $p['in_errors'] + (int) $p['out_errors'] : 0;
+            $loc_lnms_data['rows'][$i]['port_flaps24'] = $pid ? (int) ($flaps_idx[$host . '|' . $pid . '|24'] ?? 0) : 0;
+            $loc_lnms_data['rows'][$i]['port_oper'] = $p ? (string) $p['oper'] : '';
+            $loc_lnms_data['rows'][$i]['last_link_ts'] = $lk ? (int) $lk['ts'] : 0;
+            $loc_lnms_data['rows'][$i]['last_link_txt'] = $link_txt($lk);
+            $loc_lnms_data['rows'][$i]['fdb_multi'] = $fdb && !empty($fdb['multi']);
+        }
+
         $broken_n = count(array_filter($devices, function ($d) {
             return $d['broken'];
         }));
@@ -953,6 +1133,8 @@ if ($data !== null) {
             'customers' => $cust['customers'],
             'customers_stats' => $cust['stats'],
             'flaps' => $flaps,
+            // FEAT(port-level): wiersze widoku „Porty” lecą razem z $H do heavy-cache.json.
+            'ports' => $ports_rows,
             'devices_events' => count($ev['events']),
             'devices_matched' => count(array_filter($devices, function ($d) {
                 return $d['customer_id'] !== null;
@@ -1265,6 +1447,9 @@ if ($data !== null) {
         'customers' => $H['customers'] ?? array(),
         'customers_stats' => $H['customers_stats'] ?? array('total_customers_with_errors' => 0, 'total_multi_stb' => 0),
         'flaps' => $H['flaps'] ?? array(),
+        // FEAT(port-level): widok „Porty” (problematyczne porty per switch z LibreNMS).
+        'ports' => $H['ports'] ?? array(),
+        'ports_count' => count($H['ports'] ?? array()),
         // Mapy korelacji adresowej (kontrakt dla szablonu: $iptv.loc_lms.points/.rows, $iptv.loc_lnms.points/.rows/.has_gps).
         'group' => $iptv_group,
         'loc_lms' => $loc_lms_view,
