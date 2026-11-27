@@ -29,6 +29,12 @@ class IptvLibrenms
     const EVENTLOG_LIMIT = 5000; // max wpisów eventlog na jedno pobranie (list_logs domyślnie zwraca tylko 50)
     const FLAP_WINDOW = 300; // sekundy: zmiana stanu portu w obie strony w tym oknie = flap
     const MAX_EVENT_PORTS = 300; // limit unikalnych port_id rozwiązywanych przez /ports/{id} w jednym przebiegu
+    // FEAT(port-level): kolumny pobierane z /devices/{hostname}/ports — tylko te, które API v0 akceptuje
+    // (ifHC*, ifDiscards, last_change itp. zwracają błąd "Invalid columns").
+    const PORT_COLUMNS = 'ifName,ifOperStatus,ifAdminStatus,ifSpeed,ifDuplex,ifType,ifMtu,ifAlias,ifInErrors,ifOutErrors,ifInUcastPkts,ifOutUcastPkts,ifInOctets,ifOutOctets,ifLastChange,poll_time';
+    const SYSLOG_COUNT = 2000; // max wpisów syslog na jedno urządzenie (retencja ~7 dni, pobieramy okno godzin)
+    const FLAP_MAX_HOURS = 168; // 7 dni — max okno agregacji flapów (24 h i 7 d w widoku)
+    const FLAP_EVENTS_KEEP = 10; // ile ostatnich zdarzeń trzymamy per port w agregacji flapów
     // Nazwy portów agregujących/uplink — nie wskazują fizycznej lokalizacji klienta.
     // Uwaga: eth1/0/N i Ethernet1/0/N to porty DOSTĘPOWE (D-Link DGS-1510, Huawei) — nie są uplinkiem!
     const UPLINK_PATTERN = '/^(port-channel|po\d+|vlan\d+|loopback|lo\d*|mgmt|management|10ge|xe-|uplink)/i';
@@ -219,9 +225,11 @@ class IptvLibrenms
      * Klucz = wartość z mapy wejściowej (mac albo device_id).
      *
      * @param array $urls klucz => URL
+     * @param bool $throwOnError false = błąd pojedynczego URL-a zostaje w wyniku jako ['error'=>...],
+     *        bez rzucania wyjątku (używane w batchach per switch — jeden padnięty switch nie blokuje reszty)
      * @return array klucz => zdekodowany JSON (przy błędzie pojedynczego: klucz => ['error' => msg])
      */
-    protected function fetchJsonMulti(array $urls)
+    protected function fetchJsonMulti(array $urls, $throwOnError = true)
     {
         if (!function_exists('curl_init') || !function_exists('curl_multi_init')) {
             // Fallback bez multi: sekwencyjnie (wolniej, ale działa).
@@ -291,9 +299,11 @@ class IptvLibrenms
         } while ($active || $running);
         curl_multi_close($mh);
         // Rzucamy tylko przy błędach "twardych" (nie 404) — 404 zostaje w wyniku i czytelnik traktuje jako null.
-        foreach ($out as $k => $v) {
-            if (isset($v['error']) && (int) ($v['code'] ?? 0) !== 404) {
-                throw new RuntimeException('LibreNMS API: ' . $v['error'] . ' (' . $k . ')');
+        if ($throwOnError) {
+            foreach ($out as $k => $v) {
+                if (isset($v['error']) && (int) ($v['code'] ?? 0) !== 404) {
+                    throw new RuntimeException('LibreNMS API: ' . $v['error'] . ' (' . $k . ')');
+                }
             }
         }
         return $out;
@@ -528,6 +538,552 @@ class IptvLibrenms
         usort($out, function ($a, $b) {
             return (int) $b['ts'] - (int) $a['ts'];
         });
+        return $out;
+    }
+
+    /**
+     * FEAT(port-level): statystyki portów per switch — GET /devices/{hostname}/ports?columns=... (batch
+     * curl_multi). UWAGA: /ports?device_id= NIE filtruje (zwraca wszystkie porty) — stąd ścieżka per hostname.
+     * Wynik: mapa hostname (małe litery) => ['device_id'=>int, 'ports'=>[znormalizowany port, ...]] albo null
+     * (błąd/brak urządzenia). Port: port_id, ifName, oper, admin, speed (bps), duplex, alias, in_errors,
+     * out_errors, last_change, poll_time. Cache librenms-portstats.json (TTL librenms_cache_ttl),
+     * backoff fail-librenms.json jak w getLocationsForMacs.
+     *
+     * @param array $hostnames nazwy switchy (hostname z LibreNMS)
+     * @param bool $force wymuś odświeżenie cache (nie częściej niż FORCE_MIN_AGE)
+     * @return array
+     */
+    public function getPortStatsForDevices(array $hostnames, $force = false)
+    {
+        $hosts = array();
+        foreach ($hostnames as $h) {
+            $h = mb_strtolower(trim((string) $h));
+            if ($h !== '') {
+                $hosts[$h] = true;
+            }
+        }
+        if (!$this->enabled() || !$hosts) {
+            return array();
+        }
+        $cache = $this->readJson('librenms-portstats.json');
+        $cache = is_array($cache) && isset($cache['hosts']) && is_array($cache['hosts'])
+            ? $cache
+            : array('fetched' => 0, 'hosts' => array());
+        $now = time();
+        $force = $force && (!$cache['fetched'] || ($now - (int) $cache['fetched']) >= self::FORCE_MIN_AGE);
+        $fresh_all = !$force && $cache['fetched'] && ($now - (int) $cache['fetched']) < $this->cache_ttl;
+        $failed = $force ? null : $this->recentFailure();
+
+        $out = array();
+        $missing = array();
+        foreach (array_keys($hosts) as $h) {
+            if ($fresh_all && isset($cache['hosts'][$h])) {
+                $out[$h] = $cache['hosts'][$h];
+            } elseif ($failed) {
+                // Backoff aktywny: ostatni znany wynik (albo null), bez pytania API.
+                $out[$h] = $cache['hosts'][$h] ?? null;
+            } else {
+                $missing[$h] = true;
+            }
+        }
+        if ($missing) {
+            $urls = array();
+            foreach (array_keys($missing) as $h) {
+                $urls[$h] = $this->url . '/devices/' . rawurlencode($h) . '/ports?columns=' . self::PORT_COLUMNS;
+            }
+            // throwOnError=false: jeden niedostępny switch nie zdejmuje wyników dla pozostałych.
+            $res = $this->fetchJsonMulti($urls, false);
+            $hard_errors = 0;
+            foreach ($missing as $h => $_) {
+                $resp = $res[$h] ?? array('error' => 'brak odpowiedzi');
+                if (isset($resp['error'])) {
+                    // 404 = brak takiego urządzenia — null, nie błąd. Inne kody logujemy.
+                    if ((int) ($resp['code'] ?? 0) !== 404) {
+                        $hard_errors++;
+                        error_log('[LMSIptvErrorsPlugin] librenms portstats: ' . $h . ': ' . $resp['error']);
+                    }
+                    $out[$h] = $cache['hosts'][$h] ?? null;
+                    $cache['hosts'][$h] = $out[$h];
+                    continue;
+                }
+                $ports_raw = $resp['ports'] ?? ($resp['data'] ?? array());
+                if (!is_array($ports_raw)) {
+                    $ports_raw = array();
+                }
+                $device_id = 0;
+                $ports = array();
+                foreach ($ports_raw as $p) {
+                    if (!is_array($p)) {
+                        continue;
+                    }
+                    if ($device_id === 0) {
+                        $device_id = (int) ($p['device_id'] ?? 0);
+                    }
+                    $ports[] = array(
+                        'port_id' => (int) ($p['port_id'] ?? 0),
+                        'ifName' => (string) ($p['ifName'] ?? ''),
+                        'oper' => (string) ($p['ifOperStatus'] ?? ''),
+                        'admin' => (string) ($p['ifAdminStatus'] ?? ''),
+                        'speed' => (int) ($p['ifSpeed'] ?? 0),
+                        'duplex' => (string) ($p['ifDuplex'] ?? ''),
+                        'alias' => (string) ($p['ifAlias'] ?? ''),
+                        'in_errors' => (int) ($p['ifInErrors'] ?? 0),
+                        'out_errors' => (int) ($p['ifOutErrors'] ?? 0),
+                        'last_change' => (string) ($p['ifLastChange'] ?? ''),
+                        'poll_time' => (string) ($p['poll_time'] ?? ''),
+                    );
+                }
+                $out[$h] = array('device_id' => $device_id, 'ports' => $ports);
+                $cache['hosts'][$h] = $out[$h];
+            }
+            $cache['fetched'] = $now;
+            try {
+                $this->writeJson('librenms-portstats.json', $cache);
+            } catch (Throwable $e) {
+                error_log('[LMSIptvErrorsPlugin] ' . $e->getMessage());
+            }
+            // Backoff tylko gdy padło wszystko (żaden switch nie odpowiedział poprawnie).
+            if ($hard_errors === count($missing)) {
+                $this->markFailure('LibreNMS portstats niedostępny dla wszystkich hostów');
+            } else {
+                $this->markFailure(null);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * FEAT(port-level): flapy portów per switch — eventlog type='interface' (reference = port_id),
+     * GET /logs/eventlog/{hostname} per switch (batch). Agregacja per reference: liczba zdarzeń
+     * w oknie $hours + ostatnie zdarzenia. Cache librenms-flaps.json trzyma surowe zdarzenia
+     * z najszerszego dotąd okna ('hours' w cache) — świeży gdy pokrywa żądane $hours.
+     * Wynik: mapa hostname => ['total'=>int, 'by_port'=>[port_id=>['count'=>int,'last_ts'=>int,'events'=>[...]]]]
+     *
+     * @param array $hostnames
+     * @param int $hours okno wstecz (1..168)
+     * @param bool $force
+     * @return array
+     */
+    public function getPortFlaps(array $hostnames, $hours = 24, $force = false)
+    {
+        $hours = max(1, min(self::FLAP_MAX_HOURS, (int) $hours));
+        $hosts = array();
+        foreach ($hostnames as $h) {
+            $h = mb_strtolower(trim((string) $h));
+            if ($h !== '') {
+                $hosts[$h] = true;
+            }
+        }
+        if (!$this->enabled() || !$hosts) {
+            return array();
+        }
+        $cache = $this->readJson('librenms-flaps.json');
+        $cache = is_array($cache) && isset($cache['hosts']) && is_array($cache['hosts'])
+            ? $cache
+            : array('fetched' => 0, 'hours' => 0, 'hosts' => array());
+        $now = time();
+        $force = $force && (!$cache['fetched'] || ($now - (int) $cache['fetched']) >= self::FORCE_MIN_AGE);
+        // Cache liczy się tylko gdy pokrywa żądany zakres godzin (jak getRecentPortEvents).
+        $fresh_all = !$force && $cache['fetched'] && ($now - (int) $cache['fetched']) < $this->cache_ttl
+            && (int) ($cache['hours'] ?? 0) >= $hours;
+        $failed = $force ? null : $this->recentFailure();
+
+        $out = array();
+        $missing = array();
+        foreach (array_keys($hosts) as $h) {
+            if ($fresh_all && isset($cache['hosts'][$h])) {
+                $out[$h] = $this->aggregateFlaps($cache['hosts'][$h]['events'] ?? array(), $hours, $now);
+            } elseif ($failed) {
+                $out[$h] = $this->aggregateFlaps($cache['hosts'][$h]['events'] ?? array(), $hours, $now);
+            } else {
+                $missing[$h] = true;
+            }
+        }
+        if ($missing) {
+            $from = date('Y-m-d H:i:s', $now - max($hours, (int) ($cache['hours'] ?? 0) ?: $hours) * 3600);
+            $urls = array();
+            foreach (array_keys($missing) as $h) {
+                $urls[$h] = $this->url . '/logs/eventlog/' . rawurlencode($h) . '?' . http_build_query(array(
+                    'from' => $from,
+                    'limit' => self::EVENTLOG_LIMIT,
+                    'type' => 'interface',
+                    'sortorder' => 'desc',
+                ));
+            }
+            $res = $this->fetchJsonMulti($urls, false);
+            foreach ($missing as $h => $_) {
+                $resp = $res[$h] ?? array('error' => 'brak odpowiedzi');
+                if (isset($resp['error'])) {
+                    if ((int) ($resp['code'] ?? 0) !== 404) {
+                        error_log('[LMSIptvErrorsPlugin] librenms flaps: ' . $h . ': ' . $resp['error']);
+                    }
+                    $cache['hosts'][$h] = $cache['hosts'][$h] ?? array('events' => array());
+                } else {
+                    $rows = $resp['logs'] ?? ($resp['data'] ?? array());
+                    if (!is_array($rows)) {
+                        $rows = array();
+                    }
+                    $events = array();
+                    foreach ($rows as $row) {
+                        if (!is_array($row)) {
+                            continue;
+                        }
+                        $ref = (int) ($row['reference'] ?? 0);
+                        $msg = (string) ($row['message'] ?? '');
+                        if ($ref <= 0 || $msg === '') {
+                            continue;
+                        }
+                        if (preg_match('/\bdown\b/i', $msg)) {
+                            $state = 'down';
+                        } elseif (preg_match('/\bup\b/i', $msg)) {
+                            $state = 'up';
+                        } else {
+                            continue;
+                        }
+                        $ts = strtotime((string) ($row['datetime'] ?? '')) ?: 0;
+                        if (!$ts) {
+                            continue;
+                        }
+                        $events[] = array('ts' => $ts, 'port' => $ref, 'state' => $state, 'msg' => $msg);
+                    }
+                    $cache['hosts'][$h] = array('events' => $events);
+                }
+                $out[$h] = $this->aggregateFlaps($cache['hosts'][$h]['events'] ?? array(), $hours, $now);
+            }
+            $cache['fetched'] = $now;
+            $cache['hours'] = max($hours, (int) ($cache['hours'] ?? 0));
+            try {
+                $this->writeJson('librenms-flaps.json', $cache);
+                $this->markFailure(null);
+            } catch (Throwable $e) {
+                error_log('[LMSIptvErrorsPlugin] ' . $e->getMessage());
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Agregacja surowych zdarzeń eventlog per port_id w oknie $hours: count + ostatnie zdarzenia.
+     *
+     * @return array ['total'=>int, 'by_port'=>[port_id=>['count','last_ts','events']]]
+     */
+    private function aggregateFlaps(array $events, $hours, $now)
+    {
+        $cutoff = $now - $hours * 3600;
+        $by_port = array();
+        $total = 0;
+        foreach ($events as $ev) {
+            if ((int) ($ev['ts'] ?? 0) < $cutoff) {
+                continue;
+            }
+            $total++;
+            $pid = (int) ($ev['port'] ?? 0);
+            if (!isset($by_port[$pid])) {
+                $by_port[$pid] = array('count' => 0, 'last_ts' => 0, 'events' => array());
+            }
+            $by_port[$pid]['count']++;
+            if ((int) $ev['ts'] > $by_port[$pid]['last_ts']) {
+                $by_port[$pid]['last_ts'] = (int) $ev['ts'];
+            }
+            if (count($by_port[$pid]['events']) < self::FLAP_EVENTS_KEEP) {
+                $by_port[$pid]['events'][] = $ev;
+            }
+        }
+        // events w agregacji sortujemy malejąco po ts (najnowsze pierwsze)
+        foreach ($by_port as $pid => $agg) {
+            usort($by_port[$pid]['events'], function ($a, $b) {
+                return (int) $b['ts'] - (int) $a['ts'];
+            });
+        }
+        return array('total' => $total, 'by_port' => $by_port);
+    }
+
+    /**
+     * FEAT(port-level): ostatnie wpisy syslog link up/down per switch.
+     * Filtr per urządzenie: parametr device_id (ścieżka /logs/syslog/{hostname} zwraca pusto —
+     * list_syslog filtruje po device_id, nie po hostname w ścieżce). device_id bierzemy z cache
+     * portstats albo z batchu GET /devices/{hostname}.
+     * Komunikat parsujemy: "Port 1:22 link up, 1000Mbps FULL duplex" -> port/state/speed/duplex.
+     * Wynik: mapa hostname => ['device_id'=>int, 'events'=>[{ts,port,state,speed,duplex,msg}...]]
+     * (events w oknie $hours, malejąco po ts). Cache librenms-syslog.json.
+     *
+     * @param array $hostnames
+     * @param int $hours okno wstecz (1..168)
+     * @param bool $force
+     * @return array
+     */
+    public function getPortSyslog(array $hostnames, $hours = 24, $force = false)
+    {
+        $hours = max(1, min(self::FLAP_MAX_HOURS, (int) $hours));
+        $hosts = array();
+        foreach ($hostnames as $h) {
+            $h = mb_strtolower(trim((string) $h));
+            if ($h !== '') {
+                $hosts[$h] = true;
+            }
+        }
+        if (!$this->enabled() || !$hosts) {
+            return array();
+        }
+        $cache = $this->readJson('librenms-syslog.json');
+        $cache = is_array($cache) && isset($cache['hosts']) && is_array($cache['hosts'])
+            ? $cache
+            : array('fetched' => 0, 'hours' => 0, 'hosts' => array());
+        $now = time();
+        $force = $force && (!$cache['fetched'] || ($now - (int) $cache['fetched']) >= self::FORCE_MIN_AGE);
+        $fresh_all = !$force && $cache['fetched'] && ($now - (int) $cache['fetched']) < $this->cache_ttl
+            && (int) ($cache['hours'] ?? 0) >= $hours;
+        $failed = $force ? null : $this->recentFailure();
+
+        $out = array();
+        $missing = array();
+        foreach (array_keys($hosts) as $h) {
+            if ($fresh_all && isset($cache['hosts'][$h])) {
+                $out[$h] = $this->syslogWithinHours($cache['hosts'][$h], $hours, $now);
+            } elseif ($failed) {
+                $out[$h] = $this->syslogWithinHours($cache['hosts'][$h] ?? array('device_id' => 0, 'events' => array()), $hours, $now);
+            } else {
+                $missing[$h] = true;
+            }
+        }
+        if ($missing) {
+            // device_id per host: najpierw z cache portstats (tam już jest), brakujące dopiero przez /devices/{h}.
+            $stats_cache = $this->readJson('librenms-portstats.json');
+            $stats_hosts = is_array($stats_cache) && isset($stats_cache['hosts']) && is_array($stats_cache['hosts'])
+                ? $stats_cache['hosts'] : array();
+            $device_ids = array();
+            $need_dev = array();
+            foreach (array_keys($missing) as $h) {
+                $did = (int) ($stats_hosts[$h]['device_id'] ?? 0);
+                if ($did > 0) {
+                    $device_ids[$h] = $did;
+                } else {
+                    $need_dev[$h] = true;
+                }
+            }
+            if ($need_dev) {
+                $devUrls = array();
+                foreach (array_keys($need_dev) as $h) {
+                    $devUrls[$h] = $this->url . '/devices/' . rawurlencode($h);
+                }
+                $devRes = $this->fetchJsonMulti($devUrls, false);
+                foreach ($need_dev as $h => $_) {
+                    $resp = $devRes[$h] ?? array('error' => 'brak odpowiedzi');
+                    if (!isset($resp['error'])) {
+                        $dev = $resp['devices'][0] ?? ($resp['data'][0] ?? null);
+                        if (is_array($dev)) {
+                            $device_ids[$h] = (int) ($dev['device_id'] ?? 0);
+                        }
+                    }
+                    if (!isset($device_ids[$h])) {
+                        $device_ids[$h] = 0;
+                    }
+                }
+            }
+            $from = date('Y-m-d H:i:s', $now - $hours * 3600);
+            $urls = array();
+            foreach (array_keys($missing) as $h) {
+                $did = (int) ($device_ids[$h] ?? 0);
+                if ($did <= 0) {
+                    continue; // bez device_id nie ma filtra per urządzenie — pomijamy, żeby nie lać globalnym syslogiem
+                }
+                $urls[$h] = $this->url . '/logs/syslog?' . http_build_query(array(
+                    'device_id' => $did,
+                    'from' => $from,
+                    'count' => self::SYSLOG_COUNT,
+                    'sortorder' => 'desc',
+                ));
+            }
+            $res = $urls ? $this->fetchJsonMulti($urls, false) : array();
+            foreach ($missing as $h => $_) {
+                $did = (int) ($device_ids[$h] ?? 0);
+                if ($did <= 0 || !isset($res[$h]) || isset($res[$h]['error'])) {
+                    if (isset($res[$h]['error']) && (int) ($res[$h]['code'] ?? 0) !== 404) {
+                        error_log('[LMSIptvErrorsPlugin] librenms syslog: ' . $h . ': ' . $res[$h]['error']);
+                    }
+                    $cache['hosts'][$h] = $cache['hosts'][$h] ?? array('device_id' => $did, 'events' => array());
+                } else {
+                    $rows = $res[$h]['logs'] ?? ($res[$h]['data'] ?? array());
+                    if (!is_array($rows)) {
+                        $rows = array();
+                    }
+                    $events = array();
+                    foreach ($rows as $row) {
+                        if (!is_array($row)) {
+                            continue;
+                        }
+                        $msg = (string) ($row['msg'] ?? ($row['message'] ?? ''));
+                        $parsed = $this->parseSyslogLink($msg);
+                        if ($parsed === null) {
+                            continue; // nie link up/down — nieistotne dla diagnostyki portów
+                        }
+                        $ts = strtotime((string) ($row['timestamp'] ?? '')) ?: 0;
+                        if (!$ts) {
+                            continue;
+                        }
+                        $events[] = array(
+                            'ts' => $ts,
+                            'port' => $parsed['port'],
+                            'state' => $parsed['state'],
+                            'speed' => $parsed['speed'],
+                            'duplex' => $parsed['duplex'],
+                            'msg' => $msg,
+                        );
+                    }
+                    $cache['hosts'][$h] = array('device_id' => $did, 'events' => $events);
+                }
+                $out[$h] = $this->syslogWithinHours($cache['hosts'][$h], $hours, $now);
+            }
+            $cache['fetched'] = $now;
+            $cache['hours'] = max($hours, (int) ($cache['hours'] ?? 0));
+            try {
+                $this->writeJson('librenms-syslog.json', $cache);
+                $this->markFailure(null);
+            } catch (Throwable $e) {
+                error_log('[LMSIptvErrorsPlugin] ' . $e->getMessage());
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Parsuje komunikat syslog "Port 1:22 link up, 1000Mbps FULL duplex" do struktury
+     * ['port','state','speed','duplex'] albo null gdy to nie jest link up/down.
+     *
+     * @return array|null
+     */
+    private function parseSyslogLink($msg)
+    {
+        if (!preg_match('/port\s+([0-9]+(?:[\/:.][0-9]+)*)\s*:?\s*link\s+(up|down)(?:,\s*(\d+)\s*mbps)?(?:\s+(\S+)\s+duplex)?/i', $msg, $m)) {
+            return null;
+        }
+        return array(
+            'port' => $m[1],
+            'state' => strtolower($m[2]),
+            'speed' => isset($m[3]) && $m[3] !== '' ? (int) $m[3] : 0, // Mbps
+            'duplex' => isset($m[4]) ? strtoupper($m[4]) : '',
+        );
+    }
+
+    /**
+     * Wycina zdarzenia syslog starsze niż N godzin i sortuje malejąco po ts.
+     *
+     * @return array ['device_id'=>int, 'events'=>[...]]
+     */
+    private function syslogWithinHours(array $host, $hours, $now)
+    {
+        $cutoff = $now - $hours * 3600;
+        $events = array();
+        foreach ((array) ($host['events'] ?? array()) as $ev) {
+            if ((int) ($ev['ts'] ?? 0) >= $cutoff) {
+                $events[] = $ev;
+            }
+        }
+        usort($events, function ($a, $b) {
+            return (int) $b['ts'] - (int) $a['ts'];
+        });
+        return array('device_id' => (int) ($host['device_id'] ?? 0), 'events' => $events);
+    }
+
+    /**
+     * FEAT(port-level): FDB per MAC — GET /resources/fdb/{mac}/detail (batch curl_multi).
+     * Wykrywa MAC widziany na więcej niż jednym porcie/switchu (stale FDB / flapping MAC) — flaga 'multi'.
+     * Wynik: mapa mac (znormalizowany) => ['ports'=>[{hostname,ifName,ifAlias,updated_at}...], 'multi'=>bool]
+     * albo null (MAC nieobecny w FDB). Cache librenms-fdb.json (TTL librenms_cache_ttl).
+     *
+     * @param array $macs
+     * @param bool $force
+     * @return array
+     */
+    public function getFdbDetailForMacs(array $macs, $force = false)
+    {
+        $out = array();
+        if (!$this->enabled()) {
+            foreach ($macs as $mac) {
+                $out[IptvMetrics::normalizeMac($mac)] = null;
+            }
+            return $out;
+        }
+        $list = array();
+        foreach ($macs as $mac) {
+            $m = IptvMetrics::normalizeMac($mac);
+            if ($m !== '') {
+                $list[$m] = true;
+            }
+        }
+        if (!$list) {
+            return array();
+        }
+        $cache = $this->readJson('librenms-fdb.json');
+        $cache = is_array($cache) && isset($cache['map']) && is_array($cache['map'])
+            ? $cache
+            : array('fetched' => 0, 'map' => array());
+        $now = time();
+        $force = $force && (!$cache['fetched'] || ($now - (int) $cache['fetched']) >= self::FORCE_MIN_AGE);
+        $failed = $force ? null : $this->recentFailure();
+
+        $missing = array();
+        foreach (array_keys($list) as $m) {
+            $fresh = isset($cache['map'][$m]) && $cache['fetched'] && ($now - (int) $cache['fetched']) < $this->cache_ttl;
+            if ($force || !$fresh) {
+                if ($failed) {
+                    $out[$m] = $cache['map'][$m] ?? null;
+                } else {
+                    $missing[$m] = true;
+                }
+            } else {
+                $out[$m] = $cache['map'][$m];
+            }
+        }
+        if ($missing) {
+            $urls = array();
+            foreach (array_keys($missing) as $m) {
+                $urls[$m] = $this->url . '/resources/fdb/' . urlencode($m) . '/detail';
+            }
+            $res = $this->fetchJsonMulti($urls, false);
+            foreach ($missing as $m => $_) {
+                $resp = $res[$m] ?? array('error' => 'brak odpowiedzi');
+                if (isset($resp['error'])) {
+                    if ((int) ($resp['code'] ?? 0) !== 404) {
+                        error_log('[LMSIptvErrorsPlugin] librenms fdb: ' . $m . ': ' . $resp['error']);
+                    }
+                    // 404 = MAC nieobecny w FDB — null, nie błąd.
+                    $out[$m] = $cache['map'][$m] ?? null;
+                } else {
+                    $rows = $resp['ports_fdb'] ?? ($resp['data'] ?? array());
+                    if (!is_array($rows)) {
+                        $rows = array();
+                    }
+                    $ports = array();
+                    $seen = array();
+                    foreach ($rows as $r) {
+                        if (!is_array($r)) {
+                            continue;
+                        }
+                        $host = (string) ($r['hostname'] ?? ($r['sysName'] ?? ''));
+                        $if = (string) ($r['ifName'] ?? '');
+                        $ports[] = array(
+                            'hostname' => $host,
+                            'ifName' => $if,
+                            'ifAlias' => (string) ($r['ifAlias'] ?? ''),
+                            'updated_at' => (string) ($r['updated_at'] ?? ''),
+                        );
+                        if ($host !== '' || $if !== '') {
+                            $seen[mb_strtolower($host . '|' . $if)] = true;
+                        }
+                    }
+                    $out[$m] = array('ports' => $ports, 'multi' => count($seen) > 1);
+                }
+                $cache['map'][$m] = $out[$m];
+            }
+            $cache['fetched'] = $now;
+            try {
+                $this->writeJson('librenms-fdb.json', $cache);
+                $this->markFailure(null);
+            } catch (Throwable $e) {
+                error_log('[LMSIptvErrorsPlugin] ' . $e->getMessage());
+            }
+        }
         return $out;
     }
 
