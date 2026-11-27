@@ -734,13 +734,12 @@ if ($data !== null) {
         // Budowane tylko przy odbudowie $H (razem z location/location_source), stąd lecą do heavy-cache.json
         // jako $H['loc_lms'] / $H['loc_lnms']; przy $H z cache bierzemy je stamtąd.
         // Widok LMS: punkty = przełączniki LMS z niepustymi współrzędnymi (nd.longitude/latitude),
-        // count = liczba dekoderów z błędami podłączonych do tego switcha; wiersze = dekodery ze źródłem lms_switch.
+        // count = liczba dekoderów z błędami podłączonych do tego switcha.
+        // Wiersze = wszystkie dekodery, których MAC jest w LMS (mapa źródła LMS sama w sobie),
+        // niezależnie od location_source — priorytet librenms dotyczy tylko kolumny „Lokalizacja”.
         $loc_lms_data = array('points' => array(), 'rows' => array());
         $lms_by_switch = array();
         foreach ($devices as $d) {
-            if (($d['location_source'] ?? '') !== 'lms_switch') {
-                continue;
-            }
             $m = strtolower($d['mac']);
             $sw = $sw_by_mac[$m] ?? null;
             if ($sw === null) {
@@ -790,9 +789,8 @@ if ($data !== null) {
         }
         $lnms_by_location = array();
         foreach ($devices as $d) {
-            if (($d['location_source'] ?? '') !== 'librenms') {
-                continue;
-            }
+            // Wiersze = wszystkie dekodery znalezione w FDB LibreNMS (mapa źródła sama w sobie),
+            // niezależnie od location_source — priorytet librenms tylko w kolumnie „Lokalizacja”.
             $m = strtolower($d['mac']);
             $l = $loc_lnms[$m] ?? null;
             if (!is_array($l)) {
