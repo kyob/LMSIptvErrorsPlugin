@@ -447,6 +447,11 @@
             return;
         }
         map.fitBounds(bounds, { padding: [30, 30] });
+        // Leaflet mierzy kontener tylko przy starcie — gdy layout zmieni rozmiar później
+        // (np. zmiana szerokości okna), kafelki zostają szare. invalidateSize to naprawia.
+        setTimeout(function () { map.invalidateSize(); }, 0);
+        setTimeout(function () { map.invalidateSize(); }, 300);
+        window.addEventListener('resize', function () { map.invalidateSize(); });
     };
     // Przełącznik kafelków (adblock może blokować wybranego providera).
     document.querySelectorAll('.iptv-tile-src').forEach(function (sel) {
