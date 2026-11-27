@@ -664,8 +664,8 @@ if ($data !== null) {
                 });
                 $loc_switch[$r['mac']] = $parts ? implode(', ', $parts) : '';
                 // Współrzędne GPS węzła: puste/null w LMS = brak — wtedy null (bez punktu na mapie).
-                $sw_lat = $r['longitude'];
-                $sw_lng = $r['latitude'];
+                $sw_lat = $r['latitude'];   // latitude = lat
+                $sw_lng = $r['longitude'];  // longitude = lng
                 $sw_name = (string) $r['sw_name'];
                 if ($sw_name !== '' && (int) $r['port'] > 0) {
                     $sw_name .= ' port ' . (int) $r['port'];
@@ -758,7 +758,7 @@ if ($data !== null) {
                 }
                 $sw = trim((string) $r['sw_name'] . ($r['sw_name'] !== '' && (int) $r['port'] > 0 ? ' port ' . (int) $r['port'] : ''));
                 $gps_by_customer[$cid] = array(
-                    'lat' => (float) $r['longitude'], 'lng' => (float) $r['latitude'],
+                    'lat' => (float) $r['latitude'], 'lng' => (float) $r['longitude'],
                     'node' => (string) $r['node_name'], 'switch' => $sw,
                 );
             }
