@@ -124,34 +124,36 @@ class IptvLibrenms
      */
     private function lookupMacsBatch(array $macs)
     {
-        $portUrls = array();
+        // API v0: NIE ma filtra ?mac= na /ports — FDB jest osobnym endpointem /ports/fdb/{mac}/detail
+        // (MAC w formacie z bazy: czysty hex bez separatorów). Detail zawiera port + device razem.
+        $fdbUrls = array();
         foreach ($macs as $m) {
-            // API LibreNMS filtruje FDB po formacie z bazy: czysty hex bez separatorów (ports_fdb.mac_address).
-            $portUrls[$m] = $this->url . '/ports?mac=' . urlencode(str_replace(':', '', $m));
+            $fdbUrls[$m] = $this->url . '/ports/fdb/' . urlencode(str_replace(':', '', $m)) . '/detail';
         }
-        $portRes = $this->fetchJsonMulti($portUrls);
-        // Zbierz wybrane porty per MAC + unikalne device_id do pobrania.
+        $fdbRes = $this->fetchJsonMulti($fdbUrls);
+        // Zbierz wybrane wpisy per MAC + unikalne device_id do ewentualnego doprecyzowania.
         $chosenByMac = array();
         $deviceIds = array();
         foreach ($macs as $m) {
-            $ports = $portRes[$m]['data'] ?? array();
-            if (!is_array($ports) || !$ports) {
+            $entries = $fdbRes[$m]['data'] ?? ($fdbRes[$m]['fdb'] ?? array());
+            if (!is_array($entries) || !$entries) {
                 $chosenByMac[$m] = null;
                 continue;
             }
             $chosen = null;
-            foreach ($ports as $p) {
-                $if = (string) ($p['ifName'] ?? $p['ifDescr'] ?? '');
+            foreach ($entries as $p) {
+                // Pola mogą siedzieć płasko albo w zagnieżdżonych 'port'/'device' — bierzemy oba warianty.
+                $if = (string) ($p['ifName'] ?? $p['ifDescr'] ?? ($p['port']['ifName'] ?? ''));
                 if ($if !== '' && !preg_match(self::UPLINK_PATTERN, $if)) {
                     $chosen = $p;
                     break;
                 }
             }
             if ($chosen === null) {
-                $chosen = $ports[0];
+                $chosen = $entries[0];
             }
             $chosenByMac[$m] = $chosen;
-            $did = (int) ($chosen['device_id'] ?? 0);
+            $did = (int) ($chosen['device_id'] ?? ($chosen['device']['device_id'] ?? 0));
             if ($did > 0) {
                 $deviceIds[$did] = true;
             }
@@ -171,14 +173,17 @@ class IptvLibrenms
                 $out[$m] = null;
                 continue;
             }
-            $did = (int) ($chosen['device_id'] ?? 0);
-            $switch = '';
-            $location = '';
+            $did = (int) ($chosen['device_id'] ?? ($chosen['device']['device_id'] ?? 0));
+            $switch = (string) ($chosen['device']['hostname'] ?? '');
+            $location = (string) ($chosen['device']['location'] ?? '');
+            $port = (string) ($chosen['ifName'] ?? $chosen['ifDescr'] ?? ($chosen['port']['ifName'] ?? ''));
             if ($did > 0 && isset($devRes[$did])) {
+                // Doprecyzowanie z /devices/{id}: location to nazwa lokalizacji (string), sysLocation fallback.
                 $dev = $devRes[$did]['data'] ?? $devRes[$did];
                 if (is_array($dev)) {
-                    // API v0 device: location to nazwa lokalizacji (string); sysLocation jako fallback SNMP.
-                    $switch = (string) ($dev['hostname'] ?? '');
+                    if ($switch === '') {
+                        $switch = (string) ($dev['hostname'] ?? '');
+                    }
                     $location = (string) ($dev['location'] ?? '');
                     if ($location === '') {
                         $location = (string) ($dev['sysLocation'] ?? '');
@@ -187,7 +192,7 @@ class IptvLibrenms
             }
             $out[$m] = array(
                 'switch' => $switch,
-                'port' => (string) ($chosen['ifName'] ?? $chosen['ifDescr'] ?? ''),
+                'port' => $port,
                 'location' => $location,
                 'source' => 'librenms',
             );
