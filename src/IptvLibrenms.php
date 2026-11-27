@@ -25,6 +25,7 @@ class IptvLibrenms
     const FORCE_MIN_AGE = 60; // sekundy: refresh nie pyta API częściej niż raz na minutę
     const FAILURE_BACKOFF = 90; // sekundy bez ponownych zapytań po błędzie źródła
     const MAX_RESPONSE_BYTES = 1048576; // 1 MB na jedno zapytanie
+    const CONCURRENCY = 10; // ile równoległych requestów do API LibreNMS w batchu (curl_multi)
     // Nazwy portów agregujących/uplink — nie wskazują fizycznej lokalizacji klienta.
     const UPLINK_PATTERN = '/^(ethernet\s*1\/0\/1$|eth\s*1\/0\/\d+$|10ge|xe-|ge-|port-channel|po\d|vlan\d|loopback|mgmt|management)/i';
 
@@ -75,6 +76,9 @@ class IptvLibrenms
         $force = $force && (!$cache['fetched'] || ($now - (int) $cache['fetched']) >= self::FORCE_MIN_AGE);
         $failed = $force ? null : $this->recentFailure();
 
+        // PERF: wszystkie nieświeże MAC-i jednym batch'em równoległym (curl_multi), nie po kolei.
+        // Sekwencyjnie ~100 MAC-ów × 2 requesty blokowało stronę na minuty.
+        $missing = array();
         foreach ($macs as $mac) {
             $m = IptvMetrics::normalizeMac($mac);
             if ($m === '') {
@@ -85,72 +89,192 @@ class IptvLibrenms
                 if ($failed) {
                     // Backoff aktywny: zostawiamy ostatni znany wynik (albo null), nie pytamy API.
                     $out[$m] = $cache['map'][$m] ?? null;
-                    continue;
+                } else {
+                    $missing[$m] = true;
                 }
-                try {
-                    $out[$m] = $this->lookupMac($m);
-                } catch (Throwable $e) {
-                    error_log('[LMSIptvErrorsPlugin] librenms: ' . $e->getMessage());
-                    $this->markFailure($e->getMessage());
-                    $out[$m] = $cache['map'][$m] ?? null;
-                    continue;
-                }
-                $cache['map'][$m] = $out[$m];
-                $cache['fetched'] = $now;
-                $this->writeJson('librenms.json', $cache);
             } else {
                 $out[$m] = $cache['map'][$m];
             }
         }
-        $this->markFailure(null);
+        if ($missing) {
+            try {
+                $found = $this->lookupMacsBatch(array_keys($missing));
+            } catch (Throwable $e) {
+                error_log('[LMSIptvErrorsPlugin] librenms: ' . $e->getMessage());
+                $this->markFailure($e->getMessage());
+                $found = array();
+            }
+            foreach ($missing as $m => $_) {
+                $out[$m] = $found[$m] ?? ($cache['map'][$m] ?? null);
+                $cache['map'][$m] = $out[$m];
+            }
+            $cache['fetched'] = $now;
+            $this->writeJson('librenms.json', $cache);
+            $this->markFailure(null);
+        }
         return $out;
     }
 
     /**
-     * Pojedynczy MAC: port z FDB (preferowany port dostępowy, nie uplink) -> device -> lokalizacja.
+     * Batch równoległy (curl_multi): MAC -> port FDB -> device -> lokalizacja.
+     * Dwa etapy: najpierw /ports?mac= dla wszystkich MAC-ów naraz, potem /devices/{id}
+     * dla unikalnych device_id naraz. Limit współbieżności CONCURRENCY.
      *
-     * @return array|null ['switch','port','location','source'] albo null gdy MAC nieznany w FDB
+     * @return array mac => ['switch','port','location','source'] | null
      */
-    private function lookupMac($mac)
+    private function lookupMacsBatch(array $macs)
     {
-        $ports = $this->fetchJson($this->url . '/ports?mac=' . urlencode($mac));
-        $ports = $ports['data'] ?? array();
-        if (!is_array($ports) || !$ports) {
-            return null;
+        $portUrls = array();
+        foreach ($macs as $m) {
+            $portUrls[$m] = $this->url . '/ports?mac=' . urlencode($m);
         }
-        // Wybierz port dostępowy: pierwszy, którego ifName nie wygląda na uplink/agregację.
-        $chosen = null;
-        foreach ($ports as $p) {
-            $if = (string) ($p['ifName'] ?? $p['ifDescr'] ?? '');
-            if ($if !== '' && !preg_match(self::UPLINK_PATTERN, $if)) {
-                $chosen = $p;
-                break;
+        $portRes = $this->fetchJsonMulti($portUrls);
+        // Zbierz wybrane porty per MAC + unikalne device_id do pobrania.
+        $chosenByMac = array();
+        $deviceIds = array();
+        foreach ($macs as $m) {
+            $ports = $portRes[$m]['data'] ?? array();
+            if (!is_array($ports) || !$ports) {
+                $chosenByMac[$m] = null;
+                continue;
             }
-        }
-        if ($chosen === null) {
-            $chosen = $ports[0];
-        }
-        $deviceId = (int) ($chosen['device_id'] ?? 0);
-        $switch = '';
-        $location = '';
-        if ($deviceId > 0) {
-            $dev = $this->fetchJson($this->url . '/devices/' . $deviceId);
-            $dev = $dev['data'] ?? $dev;
-            if (is_array($dev)) {
-                // API v0 device: location to już nazwa lokalizacji (string); sysLocation jako fallback SNMP.
-                $switch = (string) ($dev['hostname'] ?? '');
-                $location = (string) ($dev['location'] ?? '');
-                if ($location === '') {
-                    $location = (string) ($dev['sysLocation'] ?? '');
+            $chosen = null;
+            foreach ($ports as $p) {
+                $if = (string) ($p['ifName'] ?? $p['ifDescr'] ?? '');
+                if ($if !== '' && !preg_match(self::UPLINK_PATTERN, $if)) {
+                    $chosen = $p;
+                    break;
                 }
             }
+            if ($chosen === null) {
+                $chosen = $ports[0];
+            }
+            $chosenByMac[$m] = $chosen;
+            $did = (int) ($chosen['device_id'] ?? 0);
+            if ($did > 0) {
+                $deviceIds[$did] = true;
+            }
         }
-        return array(
-            'switch' => $switch,
-            'port' => (string) ($chosen['ifName'] ?? $chosen['ifDescr'] ?? ''),
-            'location' => $location,
-            'source' => 'librenms',
-        );
+        $devRes = array();
+        if ($deviceIds) {
+            $devUrls = array();
+            foreach (array_keys($deviceIds) as $did) {
+                $devUrls[$did] = $this->url . '/devices/' . $did;
+            }
+            $devRes = $this->fetchJsonMulti($devUrls);
+        }
+        $out = array();
+        foreach ($macs as $m) {
+            $chosen = $chosenByMac[$m];
+            if ($chosen === null) {
+                $out[$m] = null;
+                continue;
+            }
+            $did = (int) ($chosen['device_id'] ?? 0);
+            $switch = '';
+            $location = '';
+            if ($did > 0 && isset($devRes[$did])) {
+                $dev = $devRes[$did]['data'] ?? $devRes[$did];
+                if (is_array($dev)) {
+                    // API v0 device: location to nazwa lokalizacji (string); sysLocation jako fallback SNMP.
+                    $switch = (string) ($dev['hostname'] ?? '');
+                    $location = (string) ($dev['location'] ?? '');
+                    if ($location === '') {
+                        $location = (string) ($dev['sysLocation'] ?? '');
+                    }
+                }
+            }
+            $out[$m] = array(
+                'switch' => $switch,
+                'port' => (string) ($chosen['ifName'] ?? $chosen['ifDescr'] ?? ''),
+                'location' => $location,
+                'source' => 'librenms',
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * Równoległe GET-y JSON (curl_multi), limit współbieżności CONCURRENCY.
+     * Klucz = wartość z mapy wejściowej (mac albo device_id).
+     *
+     * @param array $urls klucz => URL
+     * @return array klucz => zdekodowany JSON (przy błędzie pojedynczego: klucz => ['error' => msg])
+     */
+    private function fetchJsonMulti(array $urls)
+    {
+        if (!function_exists('curl_init') || !function_exists('curl_multi_init')) {
+            // Fallback bez multi: sekwencyjnie (wolniej, ale działa).
+            $out = array();
+            foreach ($urls as $k => $u) {
+                try {
+                    $out[$k] = $this->fetchJson($u);
+                } catch (Throwable $e) {
+                    $out[$k] = array('error' => $e->getMessage());
+                }
+            }
+            return $out;
+        }
+        $mh = curl_multi_init();
+        $handles = array();
+        $queue = $urls;
+        $running = array();
+        $out = array();
+        $spawn = function () use (&$queue, &$handles, &$running, $mh) {
+            while (count($running) < self::CONCURRENCY && $queue) {
+                $k = key($queue);
+                $u = current($queue);
+                unset($queue[$k]);
+                $ch = curl_init($u);
+                curl_setopt_array($ch, array(
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 15,
+                    CURLOPT_CONNECTTIMEOUT => 5,
+                    CURLOPT_MAXFILESIZE => self::MAX_RESPONSE_BYTES,
+                    CURLOPT_HTTPHEADER => array('X-Auth-Token: ' . $this->token, 'Accept: application/json'),
+                ));
+                curl_multi_add_handle($mh, $ch);
+                $handles[(int) $ch] = array('ch' => $ch, 'key' => $k);
+                $running[(int) $ch] = true;
+            }
+        };
+        $spawn();
+        do {
+            curl_multi_exec($mh, $active);
+            if ($active) {
+                curl_multi_select($mh, 0.2);
+            }
+            // Zbierz zakończone handlery.
+            while (($info = curl_multi_info_read($mh)) !== false) {
+                $ch = $info['handle'];
+                $id = (int) $ch;
+                if (!isset($handles[$id])) {
+                    continue;
+                }
+                $k = $handles[$id]['key'];
+                $body = curl_multi_getcontent($ch);
+                $code = (int) $info['http_code'];
+                $err = curl_error($ch);
+                curl_multi_remove_handle($mh, $ch);
+                curl_close($ch);
+                unset($handles[$id], $running[$id]);
+                if ($body === false || $body === '' || $code !== 200) {
+                    $out[$k] = array('error' => 'HTTP ' . $code . ($err ? ': ' . $err : ''));
+                } else {
+                    $json = json_decode($body, true);
+                    $out[$k] = is_array($json) ? $json : array('error' => 'bad json');
+                }
+                $spawn();
+            }
+        } while ($active || $running);
+        curl_multi_close($mh);
+        // Jeśli którykolwiek request się wyłożył — rzucamy, żeby markFailure złapał backoff.
+        foreach ($out as $k => $v) {
+            if (isset($v['error'])) {
+                throw new RuntimeException('LibreNMS API: ' . $v['error'] . ' (' . $k . ')');
+            }
+        }
+        return $out;
     }
 
     /**
