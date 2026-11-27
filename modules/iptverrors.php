@@ -941,7 +941,7 @@ if ($data !== null) {
             }
             $label = $key !== '' ? $key : '—';
             if (!isset($out[$key])) {
-                $out[$key] = array('key' => $key, 'label' => $label, 'errors' => 0, 'stb' => 0, 'macs' => array(), 'lat' => null, 'lng' => null);
+                $out[$key] = array('key' => $key, 'label' => $label, 'errors' => 0, 'stb' => 0, 'macs' => array(), 'macs_txt' => '', 'lat' => null, 'lng' => null);
             }
             $out[$key]['errors'] += (int) $r['errors'];
             $out[$key]['stb']++;
@@ -961,7 +961,12 @@ if ($data !== null) {
         usort($out, function ($a, $b) {
             return $b['errors'] <=> $a['errors'];
         });
-        return array('groups' => array_values($out), 'points' => $points);
+        $out = array_values($out);
+        foreach ($out as &$g) {
+            $g['macs_txt'] = implode(', ', array_slice($g['macs'], 0, 20));
+        }
+        unset($g);
+        return array('groups' => $out, 'points' => $points);
     };
     $loc_lms_view = $H['loc_lms'] ?? array('points' => array(), 'rows' => array(), 'groups' => array(), 'group_points' => array());
     $loc_lnms_view = $H['loc_lnms'] ?? array('points' => array(), 'rows' => array(), 'has_gps' => false, 'groups' => array(), 'group_points' => array());

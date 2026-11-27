@@ -341,7 +341,7 @@
                     <td>{$g.label|escape}</td>
                     <td class="n">{$g.stb}</td>
                     <td class="n"><span class="iptv-chip {if $g.errors >= 10}hi{elseif $g.errors >= 3}mid{/if}">{$g.errors}</span></td>
-                    <td><code>{$g.macs|@implode:', '|escape}</code></td>
+                    <td><code>{$g.macs_txt|escape}</code></td>
                 </tr>
             {foreachelse}
                 <tr><td colspan="5" class="iptv-empty">{trans('Brak wierszy do wyświetlenia.')}</td></tr>
@@ -414,7 +414,7 @@
                     <td>{$g.label|escape}</td>
                     <td class="n">{$g.stb}</td>
                     <td class="n"><span class="iptv-chip {if $g.errors >= 10}hi{elseif $g.errors >= 3}mid{/if}">{$g.errors}</span></td>
-                    <td><code>{$g.macs|@implode:', '|escape}</code></td>
+                    <td><code>{$g.macs_txt|escape}</code></td>
                 </tr>
             {foreachelse}
                 <tr><td colspan="5" class="iptv-empty">{trans('Brak wierszy do wyświetlenia.')}</td></tr>
