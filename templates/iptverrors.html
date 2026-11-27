@@ -427,6 +427,11 @@
     window.initIptvMap = function (containerId, emptyMsg, errorsLabel) {
         var el = document.getElementById(containerId);
         if (!el || typeof L === 'undefined') { return; }
+        // Czekamy aż layout nada kontenerowi rozmiar — inaczej kafelki się nie renderują.
+        if (el.clientWidth < 50 || el.clientHeight < 50) {
+            setTimeout(function () { window.initIptvMap(containerId, emptyMsg, errorsLabel); }, 200);
+            return;
+        }
         var points = [];
         try { points = JSON.parse(el.getAttribute('data-points') || '[]'); } catch (e) { points = []; }
         if (!Array.isArray(points)) { points = []; }
@@ -471,14 +476,15 @@
         var FitControl = L.Control.extend({
             options: { position: 'topleft' },
             onAdd: function () {
-                var btn = L.DomUtil.create('button', 'iptv-map-fit', this._container);
+                var container = L.DomUtil.create('div', 'leaflet-bar iptv-map-fit-wrap');
+                var btn = L.DomUtil.create('button', 'iptv-map-fit', container);
                 btn.type = 'button';
                 btn.title = 'Pokaż wszystkie punkty';
                 btn.textContent = '⌂';
-                btn.style.cssText = 'width:30px;height:30px;font-size:16px;cursor:pointer;background:#fff;border:0;border-bottom:1px solid #ccc;';
+                btn.style.cssText = 'width:30px;height:30px;font-size:16px;line-height:1;cursor:pointer;';
                 L.DomEvent.disableClickPropagation(btn);
                 L.DomEvent.on(btn, 'click', function () { fitAll(); });
-                return this._container;
+                return container;
             }
         });
         map.addControl(new FitControl());
@@ -486,6 +492,7 @@
         // (np. zmiana szerokości okna), kafelki zostają szare. invalidateSize to naprawia.
         setTimeout(function () { map.invalidateSize(); }, 0);
         setTimeout(function () { map.invalidateSize(); }, 300);
+        setTimeout(function () { map.invalidateSize(); }, 1000);
         window.addEventListener('resize', function () { map.invalidateSize(); });
     };
     // Przełącznik kafelków (adblock może blokować wybranego providera).
@@ -498,10 +505,10 @@
 {/literal}
 </script>
 {if $iptv.mode == 'loc_lms'}
-<script>window.initIptvMap('iptv-map-lms', '{trans('Brak punktów z współrzędnymi')|escape:'javascript'}', '{trans('Dekodery z błędami')|escape:'javascript'}');</script>
+<script>window.addEventListener('load', function () { window.initIptvMap('iptv-map-lms', '{trans('Brak punktów z współrzędnymi')|escape:'javascript'}', '{trans('Dekodery z błędami')|escape:'javascript'}'); });</script>
 {/if}
 {if $iptv.mode == 'loc_lnms' && $iptv.loc_lnms.has_gps}
-<script>window.initIptvMap('iptv-map-lnms', '{trans('Brak punktów z współrzędnymi')|escape:'javascript'}', '{trans('Dekodery z błędami')|escape:'javascript'}');</script>
+<script>window.addEventListener('load', function () { window.initIptvMap('iptv-map-lnms', '{trans('Brak punktów z współrzędnymi')|escape:'javascript'}', '{trans('Dekodery z błędami')|escape:'javascript'}'); });</script>
 {/if}
 {/if}
 
