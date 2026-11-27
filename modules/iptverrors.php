@@ -473,6 +473,20 @@ if ($data !== null) {
         $H = $heavy_cache['data'];
     }
     if ($heavy && $H === null) {
+        // flock na pliku lock (jak historia w IptvMetrics::recordHistory): dwa równoczesne
+        // requesty nie mają liczyć tego samego ciężkiego bloku dwa razy.
+        $heavy_lock_file = $iptv_heavy_file . '.lock';
+        $heavy_lock = is_dir(dirname($iptv_heavy_file)) ? fopen($heavy_lock_file, 'c') : false;
+        if ($heavy_lock !== false && flock($heavy_lock, LOCK_EX)) {
+            @chmod($heavy_lock_file, 0600);
+            // Double-check po locku: gdy czekaliśmy, inny request mógł już przebudować cache.
+            $hc2 = is_readable($iptv_heavy_file) ? json_decode((string) file_get_contents($iptv_heavy_file), true) : null;
+            if (!$iptv_force && is_array($hc2) && isset($hc2['fetched'], $hc2['data']) && is_array($hc2['data'])
+                && ($now - (int) $hc2['fetched']) < $cache_ttl) {
+                $H = $hc2['data'];
+            }
+        }
+        if ($H === null) {
         // Dekodery z /api/errors (ostatnie ~200 zdarzeń), pogrupowane po MAC.
         $ev = $client->getEvents($iptv_force);
         $by_mac = array();
@@ -923,6 +937,12 @@ if ($data !== null) {
                     'stb_errors' => $host !== '' ? ($stb_err_by_switch[$host] ?? 0) : 0,
                 );
             }
+            // Limit tego, co leci do heavy-cache.json: max 1000 najnowszych zdarzeń
+            // (EVENTLOG_LIMIT=5000 w IptvLibrenms to za dużo na plik cache).
+            usort($flaps, function ($a, $b) {
+                return (int) $b['ts'] <=> (int) $a['ts'];
+            });
+            $flaps = array_slice($flaps, 0, 1000);
         }
 
         // FEAT(port-level): diagnostyka portów LibreNMS — statystyki portów, flapy 24 h/7 d, syslog link
@@ -1156,6 +1176,11 @@ if ($data !== null) {
                 @unlink($tmp);
             }
         }
+        }
+        if ($heavy_lock !== false) {
+            flock($heavy_lock, LOCK_UN);
+            fclose($heavy_lock);
+        }
     }
     $devices = $H['devices'] ?? array();
     $candidates = $H['candidates'] ?? array();
@@ -1253,12 +1278,12 @@ if ($data !== null) {
     $usable = array();
     foreach ($history as $snap) {
         $t = (int) ($snap['v']['total_errors'] ?? 0);
-        if ($t > 0 && $t <= IptvAlerts::MAX_USABLE_TOTAL) {
+        if ($t > 0 && $t <= IptvAlerts::threshold('max_usable_total', IptvAlerts::MAX_USABLE_TOTAL)) {
             $usable[] = $snap;
         }
     }
     $baseline_ok = $history
-        && ($now - (int) $history[0]['t']) >= IptvAlerts::MIN_BASELINE_HOURS * 3600
+        && ($now - (int) $history[0]['t']) >= IptvAlerts::threshold('min_baseline_hours', IptvAlerts::MIN_BASELINE_HOURS) * 3600
         && count($usable) >= 36;
     $usable_totals = array();
     foreach ($usable as $snap) {
@@ -1291,7 +1316,7 @@ if ($data !== null) {
     }
     $prev_snap = null;
     for ($i = count($history) - 1; $i >= 0; $i--) {
-        if ($now - (int) $history[$i]['t'] >= IptvAlerts::PREV_MIN_AGE) {
+        if ($now - (int) $history[$i]['t'] >= IptvAlerts::threshold('prev_min_age', IptvAlerts::PREV_MIN_AGE)) {
             $prev_snap = $history[$i];
             break;
         }
