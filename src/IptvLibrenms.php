@@ -138,6 +138,11 @@ class IptvLibrenms
         $deviceIds = array();
         foreach ($macs as $m) {
             $resp = $fdbRes[$m];
+            // HTTP 404 "mac not found" = dekoder nieaktywny w FDB — to null, nie błąd.
+            if (isset($resp['error'])) {
+                $chosenByMac[$m] = null;
+                continue;
+            }
             $entries = $resp['data'] ?? ($resp['ports'] ?? ($resp['fdb'] ?? array()));
             if (!is_array($entries)) {
                 $entries = array();
@@ -272,7 +277,8 @@ class IptvLibrenms
                 curl_close($ch);
                 unset($handles[$id], $running[$id]);
                 if ($body === false || $body === '' || $code !== 200) {
-                    $out[$k] = array('error' => 'HTTP ' . $code . ($err ? ': ' . $err : ''));
+                    // Kod HTTP zachowujemy osobno — 404 "mac not found" to nie błąd, tylko brak w FDB.
+                    $out[$k] = array('error' => 'HTTP ' . $code . ($err ? ': ' . $err : ''), 'code' => $code);
                 } else {
                     $json = json_decode($body, true);
                     $out[$k] = is_array($json) ? $json : array('error' => 'bad json');
@@ -281,9 +287,9 @@ class IptvLibrenms
             }
         } while ($active || $running);
         curl_multi_close($mh);
-        // Jeśli którykolwiek request się wyłożył — rzucamy, żeby markFailure złapał backoff.
+        // Rzucamy tylko przy błędach "twardych" (nie 404) — 404 zostaje w wyniku i czytelnik traktuje jako null.
         foreach ($out as $k => $v) {
-            if (isset($v['error'])) {
+            if (isset($v['error']) && (int) ($v['code'] ?? 0) !== 404) {
                 throw new RuntimeException('LibreNMS API: ' . $v['error'] . ' (' . $k . ')');
             }
         }
