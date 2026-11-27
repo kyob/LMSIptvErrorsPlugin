@@ -313,7 +313,14 @@
 
         {if $iptv.mode == 'loc_lms'}
         <h2 class="iptv-h">{trans('Mapa LMS — lokalizacje z błędami')}</h2>
-        <p class="iptv-muted" style="margin:0 0 4px;">{trans('Punktów na mapie')}: {count($iptv.loc_lms.points)}.</p>
+        <p class="iptv-muted" style="margin:0 0 4px;">{trans('Punktów na mapie')}: {count($iptv.loc_lms.points)}.
+            {trans('Kafelki')}:
+            <select class="iptv-tile-src" data-map="iptv-map-lms" style="margin-left:6px;">
+                <option value="osm">OpenStreetMap</option>
+                <option value="wikimedia">Wikimedia</option>
+                <option value="carto">Carto light</option>
+            </select>
+        </p>
         <div class="iptv-map-box" id="iptv-map-lms" style="height:420px; border:1px solid var(--alfa-border); border-radius:var(--alfa-radius-sm); overflow:hidden;" data-points="{$iptv.loc_lms.points|@json_encode|escape:'html'}"></div>
         <div class="iptv-tbl-wrap">
         <table class="table table-striped table-hover iptv-tbl" id="iptv-loc-lms">
@@ -343,7 +350,14 @@
         {if $iptv.mode == 'loc_lnms'}
         <h2 class="iptv-h">{trans('Mapa LibreNMS — lokalizacje z błędami')}</h2>
         {if $iptv.loc_lnms.has_gps}
-            <p class="iptv-muted" style="margin:0 0 4px;">{trans('Punktów na mapie')}: {count($iptv.loc_lnms.points)}.</p>
+            <p class="iptv-muted" style="margin:0 0 4px;">{trans('Punktów na mapie')}: {count($iptv.loc_lnms.points)}.
+                {trans('Kafelki')}:
+                <select class="iptv-tile-src" data-map="iptv-map-lnms" style="margin-left:6px;">
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="wikimedia">Wikimedia</option>
+                    <option value="carto">Carto light</option>
+                </select>
+            </p>
             <div class="iptv-map-box" id="iptv-map-lnms" style="height:420px; border:1px solid var(--alfa-border); border-radius:var(--alfa-radius-sm); overflow:hidden;" data-points="{$iptv.loc_lnms.points|@json_encode|escape:'html'}"></div>
         {else}
             <div class="iptv-alert warn">
@@ -395,6 +409,20 @@
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
         });
     }
+    // Źródła kafelków — adblock często blokuje tile.openstreetmap.org, stąd przełącznik.
+    var TILE_SOURCES = {
+        osm: { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attr: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' },
+        wikimedia: { url: 'https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png', attr: '&copy; <a href="https://wikimediafoundation.org/wiki/Policy:Maps_Terms_of_Use" target="_blank" rel="noopener">Wikimedia maps</a>' },
+        carto: { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', attr: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>' }
+    };
+    window.__iptvMaps = {};
+    window.setIptvTiles = function (containerId, provider) {
+        var entry = window.__iptvMaps[containerId];
+        var src = TILE_SOURCES[provider] || TILE_SOURCES.osm;
+        if (!entry) { return; }
+        if (entry.layer) { entry.map.removeLayer(entry.layer); }
+        entry.layer = L.tileLayer(src.url, { maxZoom: 19, attribution: src.attr, subdomains: 'abcd' }).addTo(entry.map);
+    };
     window.initIptvMap = function (containerId, emptyMsg, errorsLabel) {
         var el = document.getElementById(containerId);
         if (!el || typeof L === 'undefined') { return; }
@@ -402,10 +430,8 @@
         try { points = JSON.parse(el.getAttribute('data-points') || '[]'); } catch (e) { points = []; }
         if (!Array.isArray(points)) { points = []; }
         var map = L.map(el).setView([52.0, 19.0], 6);
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
-        }).addTo(map);
+        var layer = L.tileLayer(TILE_SOURCES.osm.url, { maxZoom: 19, attribution: TILE_SOURCES.osm.attr }).addTo(map);
+        window.__iptvMaps[containerId] = { map: map, layer: layer };
         var bounds = [];
         points.forEach(function (p) {
             var lat = parseFloat(p.lat), lng = parseFloat(p.lng);
@@ -422,6 +448,12 @@
         }
         map.fitBounds(bounds, { padding: [30, 30] });
     };
+    // Przełącznik kafelków (adblock może blokować wybranego providera).
+    document.querySelectorAll('.iptv-tile-src').forEach(function (sel) {
+        sel.addEventListener('change', function () {
+            window.setIptvTiles(sel.getAttribute('data-map'), sel.value);
+        });
+    });
 })();
 {/literal}
 </script>
