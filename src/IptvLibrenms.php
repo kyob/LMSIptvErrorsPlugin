@@ -124,18 +124,23 @@ class IptvLibrenms
      */
     private function lookupMacsBatch(array $macs)
     {
-        // API v0: NIE ma filtra ?mac= na /ports — FDB jest osobnym endpointem /ports/fdb/{mac}/detail
-        // (MAC w formacie z bazy: czysty hex bez separatorów). Detail zawiera port + device razem.
+        // API v0 (docs.librenms.org/API/Ports): GET /ports/mac/{search} — szuka MAC w FDB, zwraca porty
+        // posortowane po liczbie MAC na porcie. Przyjmuje format z dwukropkami (00:1a:79:...).
+        // Uwaga: /ports?mac= NIE istnieje jako filtr — stąd wcześniejsze puste wyniki.
         $fdbUrls = array();
         foreach ($macs as $m) {
-            $fdbUrls[$m] = $this->url . '/ports/fdb/' . urlencode(str_replace(':', '', $m)) . '/detail';
+            $fdbUrls[$m] = $this->url . '/ports/mac/' . urlencode($m);
         }
         $fdbRes = $this->fetchJsonMulti($fdbUrls);
         // Zbierz wybrane wpisy per MAC + unikalne device_id do ewentualnego doprecyzowania.
         $chosenByMac = array();
         $deviceIds = array();
         foreach ($macs as $m) {
-            $entries = $fdbRes[$m]['data'] ?? ($fdbRes[$m]['fdb'] ?? array());
+            $resp = $fdbRes[$m];
+            $entries = $resp['data'] ?? ($resp['ports'] ?? ($resp['fdb'] ?? array()));
+            if (!is_array($entries)) {
+                $entries = array();
+            }
             if (!is_array($entries) || !$entries) {
                 $chosenByMac[$m] = null;
                 continue;
