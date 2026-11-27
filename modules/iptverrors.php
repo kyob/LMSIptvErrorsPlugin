@@ -874,74 +874,6 @@ if ($data !== null) {
             }
         }
 
-        // Grupowanie perspektywy (?group=switch|subnet|location): agregacja wierszy mapy per klucz —
-        // suma błędów, liczba STB, lista MAC, pierwszy dostępny punkt GPS (centroid grupy na mapie).
-        $iptv_group = in_array($_GET['group'] ?? '', array('switch', 'subnet', 'location'), true) ? $_GET['group'] : '';
-        $build_map_groups = function (array $rows, $group) {
-            $out = array();
-            foreach ($rows as $r) {
-                if ($group === 'switch') {
-                    $key = (string) ($r['switch'] ?? '');
-                    $label = $key !== '' ? $key : '—';
-                } elseif ($group === 'subnet') {
-                    $key = (string) ($r['subnet'] ?? '');
-                    $label = $key !== '' ? $key : '—';
-                } else { // location
-                    $key = (string) ($r['location'] ?? ($r['city'] ?? ''));
-                    $label = $key !== '' ? $key : '—';
-                }
-                if (!isset($out[$key])) {
-                    $out[$key] = array('key' => $key, 'label' => $label, 'errors' => 0, 'stb' => 0, 'macs' => array(), 'lat' => null, 'lng' => null);
-                }
-                $out[$key]['errors'] += (int) $r['errors'];
-                $out[$key]['stb']++;
-                $out[$key]['macs'][] = $r['mac'];
-                if ($out[$key]['lat'] === null && isset($r['lat']) && $r['lat'] !== null && isset($r['lng']) && $r['lng'] !== null) {
-                    $out[$key]['lat'] = (float) $r['lat'];
-                    $out[$key]['lng'] = (float) $r['lng'];
-                }
-            }
-            // Punkty mapy dla widoku grupowanego: count = suma błędów w grupie.
-            $points = array();
-            foreach ($out as $g) {
-                if ($g['lat'] === null || $g['lng'] === null) {
-                    continue;
-                }
-                $points[] = array('lat' => $g['lat'], 'lng' => $g['lng'], 'label' => $g['label'], 'count' => $g['errors'], 'macs' => array_slice($g['macs'], 0, 20));
-            }
-            usort($out, function ($a, $b) {
-                return $b['errors'] <=> $a['errors'];
-            });
-            return array('groups' => array_values($out), 'points' => $points);
-        };
-        if ($iptv_group !== '') {
-            // loc_lms rows mają lat/lng; loc_lnms rows nie — doklejamy współrzędne z points per MAC.
-            $lnms_pts_by_mac = array();
-            foreach ($loc_lnms_data['points'] as $p) {
-                foreach ($p['macs'] as $mm) {
-                    $lnms_pts_by_mac[$mm] = $p;
-                }
-            }
-            $lnms_rows_gps = array();
-            foreach ($loc_lnms_data['rows'] as $r) {
-                $p = $lnms_pts_by_mac[$r['mac']] ?? null;
-                $r['lat'] = $p['lat'] ?? null;
-                $r['lng'] = $p['lng'] ?? null;
-                $lnms_rows_gps[] = $r;
-            }
-            $g1 = $build_map_groups($loc_lms_data['rows'], $iptv_group);
-            $loc_lms_data['groups'] = $g1['groups'];
-            $loc_lms_data['group_points'] = $g1['points'];
-            $g2 = $build_map_groups($lnms_rows_gps, $iptv_group);
-            $loc_lnms_data['groups'] = $g2['groups'];
-            $loc_lnms_data['group_points'] = $g2['points'];
-        } else {
-            $loc_lms_data['groups'] = array();
-            $loc_lms_data['group_points'] = array();
-            $loc_lnms_data['groups'] = array();
-            $loc_lnms_data['group_points'] = array();
-        }
-
         $broken_n = count(array_filter($devices, function ($d) {
             return $d['broken'];
         }));
@@ -992,6 +924,68 @@ if ($data !== null) {
     $candidates = $H['candidates'] ?? array();
     if ($H !== null && !empty($H['hints_extra'])) {
         $hints = array_merge($hints, $H['hints_extra']);
+    }
+
+    // Grupowanie map (?group=...) liczymy zawsze z wierszy $H — także gdy $H przyszedł z cache
+    // (stary cache nie ma kluczy groups/group_points). Bez tego grupowanie "nie działało" przy cache.
+    $iptv_group = in_array($_GET['group'] ?? '', array('switch', 'subnet', 'location'), true) ? $_GET['group'] : '';
+    $build_map_groups = function (array $rows, $group) {
+        $out = array();
+        foreach ($rows as $r) {
+            if ($group === 'switch') {
+                $key = (string) ($r['switch'] ?? '');
+            } elseif ($group === 'subnet') {
+                $key = (string) ($r['subnet'] ?? '');
+            } else {
+                $key = (string) ($r['location'] ?? ($r['city'] ?? ''));
+            }
+            $label = $key !== '' ? $key : '—';
+            if (!isset($out[$key])) {
+                $out[$key] = array('key' => $key, 'label' => $label, 'errors' => 0, 'stb' => 0, 'macs' => array(), 'lat' => null, 'lng' => null);
+            }
+            $out[$key]['errors'] += (int) $r['errors'];
+            $out[$key]['stb']++;
+            $out[$key]['macs'][] = $r['mac'];
+            if ($out[$key]['lat'] === null && isset($r['lat'], $r['lng']) && $r['lat'] !== null && $r['lng'] !== null) {
+                $out[$key]['lat'] = (float) $r['lat'];
+                $out[$key]['lng'] = (float) $r['lng'];
+            }
+        }
+        $points = array();
+        foreach ($out as $g) {
+            if ($g['lat'] === null || $g['lng'] === null) {
+                continue;
+            }
+            $points[] = array('lat' => $g['lat'], 'lng' => $g['lng'], 'label' => $g['label'], 'count' => $g['errors'], 'macs' => array_slice($g['macs'], 0, 20));
+        }
+        usort($out, function ($a, $b) {
+            return $b['errors'] <=> $a['errors'];
+        });
+        return array('groups' => array_values($out), 'points' => $points);
+    };
+    $loc_lms_view = $H['loc_lms'] ?? array('points' => array(), 'rows' => array(), 'groups' => array(), 'group_points' => array());
+    $loc_lnms_view = $H['loc_lnms'] ?? array('points' => array(), 'rows' => array(), 'has_gps' => false, 'groups' => array(), 'group_points' => array());
+    if ($iptv_group !== '') {
+        $g1 = $build_map_groups($loc_lms_view['rows'], $iptv_group);
+        $loc_lms_view['groups'] = $g1['groups'];
+        $loc_lms_view['group_points'] = $g1['points'];
+        // loc_lnms rows nie mają lat/lng — doklejamy z points per MAC.
+        $lnms_pts_by_mac = array();
+        foreach ($loc_lnms_view['points'] as $p) {
+            foreach ($p['macs'] as $mm) {
+                $lnms_pts_by_mac[$mm] = $p;
+            }
+        }
+        $lnms_rows_gps = array();
+        foreach ($loc_lnms_view['rows'] as $r) {
+            $p = $lnms_pts_by_mac[$r['mac']] ?? null;
+            $r['lat'] = $p['lat'] ?? null;
+            $r['lng'] = $p['lng'] ?? null;
+            $lnms_rows_gps[] = $r;
+        }
+        $g2 = $build_map_groups($lnms_rows_gps, $iptv_group);
+        $loc_lnms_view['groups'] = $g2['groups'];
+        $loc_lnms_view['group_points'] = $g2['points'];
     }
 
     // Podsumowanie dla NOC: tylko to, co wymaga reakcji. Progi w src/IptvAlerts.php (z historii migawek).
@@ -1192,8 +1186,8 @@ if ($data !== null) {
         'emergency_candidates_reason' => $H['emg_reason'] ?? '',
         // Mapy korelacji adresowej (kontrakt dla szablonu: $iptv.loc_lms.points/.rows, $iptv.loc_lnms.points/.rows/.has_gps).
         'group' => $iptv_group,
-        'loc_lms' => $H['loc_lms'] ?? array('points' => array(), 'rows' => array(), 'groups' => array(), 'group_points' => array()),
-        'loc_lnms' => $H['loc_lnms'] ?? array('points' => array(), 'rows' => array(), 'has_gps' => false, 'groups' => array(), 'group_points' => array()),
+        'loc_lms' => $loc_lms_view,
+        'loc_lnms' => $loc_lnms_view,
         'librenms_on' => $lnms->enabled(),
         'devices_events' => $H['devices_events'] ?? 0,
         'devices_count' => count($devices),
