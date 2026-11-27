@@ -645,19 +645,19 @@ if ($data !== null) {
         $loc_switch = array();
         $sw_by_mac = array();
         if ($macs_ok_all) {
-            foreach ($DB->GetAll("SELECT lower(x.mac) AS mac, nd.name AS sw_name, nd.location AS sw_loc,
-                    nd.location_city, nd.location_street, nd.location_house, nd.location_flat,
+            foreach ($DB->GetAll("SELECT lower(x.mac) AS mac, nd.name AS sw_name,
+                    a.name AS addr_name, a.city, a.street, a.house, a.flat, a.zip,
                     nd.longitude, nd.latitude
                 FROM macs x JOIN nodes n ON n.id = x.nodeid JOIN netdevices nd ON nd.id = n.netdev
+                LEFT JOIN addresses a ON a.id = nd.address_id
                 WHERE lower(x.mac) IN ?", array($macs_ok_all)) ?: array() as $r) {
-                // Lokalizacja = nd.location + adres urządzenia (puste pola pomijamy).
-                $base = trim((string) $r['sw_loc']);
-                if ($base === '') {
-                    $base = trim((string) $r['sw_name']);
-                }
-                $street = trim((string) $r['location_street'] . ' ' . (string) $r['location_house']
-                    . ($r['location_flat'] !== null && (string) $r['location_flat'] !== '' ? '/' . (string) $r['location_flat'] : ''));
-                $parts = array_filter(array($base, trim((string) $r['location_city']), $street), function ($p) {
+                // Schemat LMS (doc/lms.pgsql): netdevices nie ma kolumn adresowych — adres jest w tabeli
+                // addresses (FK netdevices.address_id); współrzędne bezpośrednio w netdevices.
+                // Lokalizacja = nazwa adresu (fallback: nazwa switcha) + miasto + ulica + kod (puste pomijamy).
+                $base = trim((string) ($r['addr_name'] !== '' ? $r['addr_name'] : $r['sw_name']));
+                $street = trim((string) $r['street'] . ' ' . (string) $r['house']
+                    . ($r['flat'] !== null && (string) $r['flat'] !== '' ? '/' . (string) $r['flat'] : ''));
+                $parts = array_filter(array($base, trim((string) $r['city']), $street, trim((string) $r['zip'])), function ($p) {
                     return $p !== '';
                 });
                 $loc_switch[$r['mac']] = $parts ? implode(', ', $parts) : '';
@@ -672,7 +672,8 @@ if ($data !== null) {
                 );
             }
         }
-        // Źródło 3 (fallback): adres klienta LMS z vaddresses (pełny adres: ulica, kod + miasto).
+        // Źródło 3 (fallback): adres klienta LMS z customeraddressview (vaddresses nie ma customerid —
+        // powiązanie klient↔adres jest w customer_addresses; customeraddressview daje gotowe full_address).
         // SEC: bind IN ? na intval'd id klientów.
         $loc_customer = array();
         $cust_ids = array_values(array_unique(array_filter(array_map('intval', array_merge(
@@ -680,17 +681,22 @@ if ($data !== null) {
             array_column($candidates, 'customer_id')
         )))));
         if ($cust_ids) {
-            foreach ($DB->GetAll("SELECT customerid, address, city, zip FROM vaddresses WHERE customerid IN ?", array($cust_ids)) ?: array() as $r) {
+            foreach ($DB->GetAll("SELECT id AS customerid, full_address, address, city, zip FROM customeraddressview WHERE id IN ?", array($cust_ids)) ?: array() as $r) {
                 $cid = (int) $r['customerid'];
-                $parts = array_filter(array(
-                    trim((string) $r['address']),
-                    trim(trim((string) $r['zip'] . ' ' . (string) $r['city'])),
-                ), function ($p) {
-                    return $p !== '';
-                });
-                // Przy wielu adresach klienta bierzemy pierwszy niepusty.
+                // full_address to gotowy string z widoku; gdy pusty — składamy z address + kod + miasto.
+                $full = trim((string) $r['full_address']);
+                if ($full === '') {
+                    $parts = array_filter(array(
+                        trim((string) $r['address']),
+                        trim(trim((string) $r['zip'] . ' ' . (string) $r['city'])),
+                    ), function ($p) {
+                        return $p !== '';
+                    });
+                    $full = $parts ? implode(', ', $parts) : '';
+                }
+                // customeraddressview ma 1 wiersz na klienta (JOIN po type=1), więc pierwszy = jedyny.
                 if (!isset($loc_customer[$cid]) || $loc_customer[$cid] === '') {
-                    $loc_customer[$cid] = $parts ? implode(', ', $parts) : '';
+                    $loc_customer[$cid] = $full;
                 }
             }
         }
