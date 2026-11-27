@@ -15,6 +15,9 @@
 require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvMetrics.php';
 require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvAlerts.php';
 require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvLibrenms.php';
+require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvTimeline.php';
+require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvCustomers.php';
+require_once PLUGINS_DIR . '/LMSIptvErrorsPlugin/src/IptvDod.php';
 
 const IPTV_BASELINE_MIN_AGE = 1800; // porównanie z migawką starszą niż 30 min, najbliższą 1 h
 const IPTV_BASELINE_TARGET = 3600;
@@ -63,9 +66,9 @@ foreach ($iptv_side_actions as $iptv_side) {
 $iptv_force = $iptv_refresh;
 
 // Widok: pusty = podsumowanie dla NOC (jeden ekran), reszta to szczegóły.
-$mode = in_array($_GET['view'] ?? '', array('subnets', 'devices', 'streams', 'models', 'emg', 'loc_lms', 'loc_lnms'), true) ? $_GET['view'] : '';
-// Ciężkie bloki (dekodery, kandydaci awarii, mapy korelacji) tylko tam, gdzie są pokazywane lub eksportowane do CSV.
-$heavy = in_array($mode, array('devices', 'emg', 'loc_lms', 'loc_lnms'), true)
+$mode = in_array($_GET['view'] ?? '', array('subnets', 'devices', 'streams', 'models', 'emg', 'loc_lms', 'loc_lnms', 'customers', 'flaps'), true) ? $_GET['view'] : '';
+// Ciężkie bloki (dekodery, kandydaci awarii, mapy korelacji, klienci, flapy) tylko tam, gdzie są pokazywane lub eksportowane do CSV.
+$heavy = in_array($mode, array('devices', 'emg', 'loc_lms', 'loc_lnms', 'customers', 'flaps'), true)
     || ($iptv_action === 'csv' && in_array($iptv_table, array('devices', 'emg'), true));
 
 // UX: filtr q (MAC / nazwa / IP / klient) — szablon używa {$iptv.q}, wiersze mają pole search.
@@ -168,6 +171,8 @@ if ($data !== null) {
             'registered' => $reg,
             'rate' => $reg > 0 ? round($m['errors'] * 100 / $reg, 1) : null,
             'delta' => $delta('model:' . $name, $m['errors']),
+            // FEAT(diag): porównanie dzień-do-dnia (vs ~24 h temu); null gdy brak migawki sprzed 24 h.
+            'dod' => IptvDod::compare($history, 'model:' . $name, $now),
             'spark' => $spark('model:' . $name, $m['errors']),
             'share' => $data['total_errors'] > 0 ? round($m['errors'] * 100 / $data['total_errors']) : 0,
         );
@@ -188,6 +193,8 @@ if ($data !== null) {
             'cidr' => $cidr, 'num' => $num, 'label' => $label,
             'errors' => $n['errors'], 'emergency' => $n['emergency'],
             'delta' => $delta('subnet:' . $cidr, $n['errors']),
+            // FEAT(diag): DoD per podsieć (klucz subnet:CIDR); null = brak danych sprzed 24 h.
+            'dod' => IptvDod::compare($history, 'subnet:' . $cidr, $now),
             'spark' => $spark('subnet:' . $cidr, $n['errors']),
         );
     }
@@ -240,6 +247,8 @@ if ($data !== null) {
         $streams[] = array(
             'group' => $group, 'errors' => $errors,
             'delta' => $delta('stream:' . $group, $errors),
+            // FEAT(diag): DoD per grupa multicast (klucz stream:grupa).
+            'dod' => IptvDod::compare($history, 'stream:' . $group, $now),
             'spark' => $spark('stream:' . $group, $errors),
         );
     }
@@ -736,6 +745,16 @@ if ($data !== null) {
         }
         unset($c);
 
+        // FEAT(diag): widok „customers" — klienci problematyczni agregowani z gotowych wierszy
+        // $devices (po dopięciu lokalizacji, stąd za $apply_location). Ląduje do $H i heavy-cache.json.
+        $cust = IptvCustomers::fromDevices($devices);
+        // Gotowe stringy do filtra q w szablonie (Smarty nie zna modyfikatora @implode).
+        foreach ($cust['customers'] as &$cc) {
+            $cc['macs_txt'] = implode(' ', $cc['macs']);
+            $cc['subnets_txt'] = implode(' ', $cc['subnets']);
+        }
+        unset($cc);
+
         // FEAT: widoki map korelacji adresowej (loc_lms / loc_lnms) — punkty do mapy + wiersze tabeli.
         // Budowane tylko przy odbudowie $H (razem z location/location_source), stąd lecą do heavy-cache.json
         // jako $H['loc_lms'] / $H['loc_lnms']; przy $H z cache bierzemy je stamtąd.
@@ -874,6 +893,38 @@ if ($data !== null) {
             }
         }
 
+        // FEAT(diag): widok „flaps" — eventlog portów LibreNMS (ostatnie 24 h) skorelowany z liczbą
+        // dekoderów z błędami podłączonych do danego switcha (wiersze loc_lnms per switch).
+        // Tylko gdy LibreNMS włączone — inaczej zero zapytań sieciowych.
+        $flaps = array();
+        if ($lnms->enabled()) {
+            $port_events = $lnms->getRecentPortEvents(24, $iptv_force);
+            // Indeks: switch (hostname z FDB, małe litery) => liczba dekoderów Z BŁĘDAMI na tym switchu.
+            $stb_err_by_switch = array();
+            foreach ($loc_lnms_data['rows'] as $r) {
+                $sw = mb_strtolower(trim((string) ($r['switch'] ?? '')));
+                if ($sw === '') {
+                    continue;
+                }
+                if (!isset($stb_err_by_switch[$sw])) {
+                    $stb_err_by_switch[$sw] = 0;
+                }
+                if ((int) ($r['errors'] ?? 0) > 0) {
+                    $stb_err_by_switch[$sw]++;
+                }
+            }
+            foreach ($port_events as $ev) {
+                $host = mb_strtolower(trim((string) ($ev['hostname'] ?? '')));
+                $flaps[] = array(
+                    'ts' => (int) ($ev['ts'] ?? 0),
+                    'hostname' => (string) ($ev['hostname'] ?? ''),
+                    'port' => (string) (($ev['ifName'] ?? '') !== '' ? $ev['ifName'] : '#' . ($ev['port'] ?? '')),
+                    'type' => (string) ($ev['type'] ?? ''), // up | down | flap
+                    'stb_errors' => $host !== '' ? ($stb_err_by_switch[$host] ?? 0) : 0,
+                );
+            }
+        }
+
         $broken_n = count(array_filter($devices, function ($d) {
             return $d['broken'];
         }));
@@ -898,6 +949,10 @@ if ($data !== null) {
             'hints_extra' => $hints_extra,
             'loc_lms' => $loc_lms_data,
             'loc_lnms' => $loc_lnms_data,
+            // FEAT(diag): klienci problematyczni + flapy portów lecą razem z $H do heavy-cache.json.
+            'customers' => $cust['customers'],
+            'customers_stats' => $cust['stats'],
+            'flaps' => $flaps,
             'devices_events' => count($ev['events']),
             'devices_matched' => count(array_filter($devices, function ($d) {
                 return $d['customer_id'] !== null;
@@ -924,6 +979,21 @@ if ($data !== null) {
     $candidates = $H['candidates'] ?? array();
     if ($H !== null && !empty($H['hints_extra'])) {
         $hints = array_merge($hints, $H['hints_extra']);
+    }
+
+    // FEAT(diag): timeline 24 h per MAC (sparkline SVG + podsumowanie trendu) — tylko w widoku devices.
+    // PERF: IptvMetrics czyta history.json/events.json raz na request (cache per-request w readJson),
+    // więc pętla po MAC-ach nie mnoży odczytów plików.
+    $timelines = array();
+    if ($mode === 'devices') {
+        foreach ($devices as $d) {
+            $series = IptvTimeline::seriesForMac($client, $d['mac'], 24);
+            $timelines[strtoupper((string) $d['mac'])] = array(
+                'svg' => IptvTimeline::sparklineSvg($series),
+                'svg_big' => IptvTimeline::sparklineSvg($series, 480, 64),
+                'summary' => IptvTimeline::summary($series),
+            );
+        }
     }
 
     // Grupowanie map (?group=...) liczymy zawsze z wierszy $H — także gdy $H przyszedł z cache
@@ -1187,8 +1257,13 @@ if ($data !== null) {
         'heavy_devices' => $heavy_devices,
         'total_spark' => $spark('total_errors', $data['total_errors']),
         'devices' => $devices,
+        'timelines' => $timelines,
         'emergency_candidates' => $candidates,
         'emergency_candidates_reason' => $H['emg_reason'] ?? '',
+        // FEAT(diag): widok „customers" (klienci problematyczni) i „flaps" (eventlog portów LibreNMS).
+        'customers' => $H['customers'] ?? array(),
+        'customers_stats' => $H['customers_stats'] ?? array('total_customers_with_errors' => 0, 'total_multi_stb' => 0),
+        'flaps' => $H['flaps'] ?? array(),
         // Mapy korelacji adresowej (kontrakt dla szablonu: $iptv.loc_lms.points/.rows, $iptv.loc_lnms.points/.rows/.has_gps).
         'group' => $iptv_group,
         'loc_lms' => $loc_lms_view,
@@ -1207,6 +1282,8 @@ if ($data !== null) {
         'total_errors' => $data['total_errors'],
         'total_emergency' => $emergency_total,
         'total_errors_delta' => $delta('total_errors', $data['total_errors']),
+        // FEAT(diag): DoD dla kafelka total_errors (klucz total_errors); null = brak migawki sprzed 24 h.
+        'total_errors_dod' => IptvDod::compare($history, 'total_errors', $now),
         'subnets_with_errors' => $with_err,
         'subnets_total' => count($subnets),
         'streams_with_errors' => count(array_filter($streams, function ($s) {

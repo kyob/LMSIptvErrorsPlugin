@@ -26,6 +26,9 @@ class IptvLibrenms
     const FAILURE_BACKOFF = 90; // sekundy bez ponownych zapytań po błędzie źródła
     const MAX_RESPONSE_BYTES = 1048576; // 1 MB na jedno zapytanie
     const CONCURRENCY = 10; // ile równoległych requestów do API LibreNMS w batchu (curl_multi)
+    const EVENTLOG_LIMIT = 5000; // max wpisów eventlog na jedno pobranie (list_logs domyślnie zwraca tylko 50)
+    const FLAP_WINDOW = 300; // sekundy: zmiana stanu portu w obie strony w tym oknie = flap
+    const MAX_EVENT_PORTS = 300; // limit unikalnych port_id rozwiązywanych przez /ports/{id} w jednym przebiegu
     // Nazwy portów agregujących/uplink — nie wskazują fizycznej lokalizacji klienta.
     // Uwaga: eth1/0/N i Ethernet1/0/N to porty DOSTĘPOWE (D-Link DGS-1510, Huawei) — nie są uplinkiem!
     const UPLINK_PATTERN = '/^(port-channel|po\d+|vlan\d+|loopback|lo\d*|mgmt|management|10ge|xe-|uplink)/i';
@@ -332,6 +335,200 @@ class IptvLibrenms
             $this->markFailure($e->getMessage());
             return is_array($cache) && isset($cache['map']) ? $cache['map'] : null;
         }
+    }
+
+    /**
+     * Zdarzenia zmiany stanu portów (up/down/flap) per switch z ostatnich N godzin — do korelacji
+     * czasowej błędów IPTV ze zdarzeniami w sieci. Źródło: eventlog LibreNMS (type='interface',
+     * reference=port_id), port_id -> ifName rozwiązywane batchowo przez /ports/{id}.
+     * Wynik (posortowany malejąco po ts): [{ts, device, hostname, port, ifName, type, msg}],
+     * gdzie type to 'up' | 'down' | 'flap' (down+up na tym samym porcie w oknie FLAP_WINDOW).
+     * Cache w librenms-events.json (TTL librenms_cache_ttl), backoff jak fail-librenms.
+     *
+     * @param int $hours ile godzin wstecz (1..720)
+     * @param bool $force wymuś odświeżenie cache (nie częściej niż FORCE_MIN_AGE)
+     * @return array
+     */
+    public function getRecentPortEvents($hours = 24, $force = false)
+    {
+        if (!$this->enabled()) {
+            return array();
+        }
+        $hours = max(1, min(720, (int) $hours));
+        $cache = $this->readJson('librenms-events.json');
+        $cache = is_array($cache) && isset($cache['events']) && is_array($cache['events'])
+            ? $cache
+            : array('fetched' => 0, 'hours' => 0, 'events' => array());
+        $now = time();
+        $force = $force && (!$cache['fetched'] || ($now - (int) $cache['fetched']) >= self::FORCE_MIN_AGE);
+        // Cache liczy się tylko gdy pokrywa żądany zakres godzin.
+        $fresh = !$force && $cache['fetched'] && ($now - (int) $cache['fetched']) < $this->cache_ttl
+            && (int) ($cache['hours'] ?? 0) >= $hours;
+        if ($fresh) {
+            return $this->eventsWithinHours($cache['events'], $hours, $now);
+        }
+        $failed = $force ? null : $this->recentFailure();
+        if ($failed) {
+            // Backoff aktywny: zwracamy ostatni znany cache, nie pytamy API.
+            return $this->eventsWithinHours($cache['events'], $hours, $now);
+        }
+        try {
+            $events = $this->fetchPortEvents($hours);
+            $this->writeJson('librenms-events.json', array('fetched' => $now, 'hours' => $hours, 'events' => $events));
+            $this->markFailure(null);
+            return $this->eventsWithinHours($events, $hours, $now);
+        } catch (Throwable $e) {
+            error_log('[LMSIptvErrorsPlugin] librenms events: ' . $e->getMessage());
+            $this->markFailure($e->getMessage());
+            return $this->eventsWithinHours($cache['events'], $hours, $now);
+        }
+    }
+
+    /**
+     * Pobranie i złożenie zdarzeń portowych: GET /logs/eventlog?from=...&limit=... (w tej wersji
+     * LibreNMS eventlog siedzi pod /logs/eventlog, NIE /eventlog — list_logs z api_functions.inc.php),
+     * potem batch /ports/{id} dla unikalnych reference (port_id) żeby dostać ifName.
+     *
+     * @return array surowa lista zdarzeń (ts, device, hostname, port, ifName, type, msg)
+     */
+    protected function fetchPortEvents($hours)
+    {
+        $from = date('Y-m-d H:i:s', time() - $hours * 3600);
+        $res = $this->fetchJson($this->url . '/logs/eventlog?' . http_build_query(array(
+            'from' => $from,
+            'limit' => self::EVENTLOG_LIMIT,
+            'sortorder' => 'desc',
+        )));
+        $rows = $res['logs'] ?? ($res['data'] ?? array());
+        if (!is_array($rows)) {
+            $rows = array();
+        }
+        $events = array();
+        $portIds = array();
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $type = (string) ($row['type'] ?? '');
+            $msg = (string) ($row['message'] ?? '');
+            $ref = (int) ($row['reference'] ?? 0);
+            // Zmiana stanu portu: type='interface' z reference=port_id; komunikat niesie "up"/"down".
+            $isPortEvent = ($type === 'interface' && $ref > 0)
+                || ($ref > 0 && preg_match('/\b(interface|port)\b/i', $msg));
+            if (!$isPortEvent || $msg === '') {
+                continue;
+            }
+            if (preg_match('/\bdown\b/i', $msg)) {
+                $state = 'down';
+            } elseif (preg_match('/\bup\b/i', $msg)) {
+                $state = 'up';
+            } else {
+                continue; // wpis interfejsu bez zmiany stanu (np. opis) — nieistotny dla korelacji
+            }
+            $ts = strtotime((string) ($row['datetime'] ?? '')) ?: null;
+            if (!$ts) {
+                continue;
+            }
+            $events[] = array(
+                'ts' => $ts,
+                'device' => (int) ($row['device_id'] ?? 0),
+                'hostname' => (string) ($row['hostname'] ?? ($row['sysName'] ?? '')),
+                'port' => $ref,
+                'ifName' => '',
+                'type' => $state,
+                'msg' => $msg,
+            );
+            $portIds[$ref] = true;
+        }
+        // Mapowanie port_id -> ifName batchowo (curl_multi); przy twardym błędzie zostajemy przy pustych ifName.
+        $names = array();
+        $ids = array_keys($portIds);
+        if ($ids) {
+            $ids = array_slice($ids, 0, self::MAX_EVENT_PORTS);
+            $urls = array();
+            foreach ($ids as $pid) {
+                $urls[$pid] = $this->url . '/ports/' . $pid;
+            }
+            try {
+                $portRes = $this->fetchJsonMulti($urls);
+                foreach ($portRes as $pid => $resp) {
+                    if (isset($resp['error'])) {
+                        continue;
+                    }
+                    // get_port_info: {"status":"ok","port":[{...}]} — pierwszy element listy.
+                    $p = $resp['port'][0] ?? ($resp['data'][0] ?? ($resp['ports'][0] ?? null));
+                    if (is_array($p) && (string) ($p['ifName'] ?? '') !== '') {
+                        $names[(int) $pid] = (string) $p['ifName'];
+                    }
+                }
+            } catch (Throwable $e) {
+                error_log('[LMSIptvErrorsPlugin] librenms events: porty niedostępne: ' . $e->getMessage());
+            }
+        }
+        foreach ($events as $i => $ev) {
+            if (isset($names[$ev['port']])) {
+                $events[$i]['ifName'] = $names[$ev['port']];
+            } elseif ($events[$i]['ifName'] === '') {
+                // Fallback: ifName często siedzi w samym komunikacie ("Interface Gi1/0/1 ... up").
+                if (preg_match('/\b([A-Za-z]+[\d\/\.\-:]+)\b.*\b(up|down)\b/i', $ev['msg'], $m)) {
+                    $events[$i]['ifName'] = $m[1];
+                } else {
+                    $events[$i]['ifName'] = '#' . $ev['port'];
+                }
+            }
+        }
+        return $this->markFlaps($events);
+    }
+
+    /**
+     * Oznacza flapy: jeśli na tym samym porcie (device+port) wystąpiła zmiana stanu w przeciwną
+     * stronę w oknie FLAP_WINDOW sekund, oba wpisy dostają type='flap'.
+     *
+     * @return array
+     */
+    private function markFlaps(array $events)
+    {
+        $byKey = array();
+        foreach ($events as $i => $ev) {
+            $byKey[$ev['device'] . ':' . $ev['port']][] = $i;
+        }
+        foreach ($byKey as $idxs) {
+            $n = count($idxs);
+            for ($a = 0; $a < $n; $a++) {
+                for ($b = $a + 1; $b < $n; $b++) {
+                    $ia = $idxs[$a];
+                    $ib = $idxs[$b];
+                    if (abs($events[$ia]['ts'] - $events[$ib]['ts']) > self::FLAP_WINDOW) {
+                        break; // dalej tylko większe odległości
+                    }
+                    if ($events[$ia]['type'] !== $events[$ib]['type']) {
+                        $events[$ia]['type'] = 'flap';
+                        $events[$ib]['type'] = 'flap';
+                    }
+                }
+            }
+        }
+        return $events;
+    }
+
+    /**
+     * Wycina zdarzenia starsze niż N godzin i sortuje malejąco po ts (najnowsze pierwsze).
+     *
+     * @return array
+     */
+    private function eventsWithinHours(array $events, $hours, $now)
+    {
+        $cutoff = $now - $hours * 3600;
+        $out = array();
+        foreach ($events as $ev) {
+            if ((int) ($ev['ts'] ?? 0) >= $cutoff) {
+                $out[] = $ev;
+            }
+        }
+        usort($out, function ($a, $b) {
+            return (int) $b['ts'] - (int) $a['ts'];
+        });
+        return $out;
     }
 
     private function fetchJson($url)
