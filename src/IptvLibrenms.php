@@ -123,7 +123,7 @@ class IptvLibrenms
      *
      * @return array mac => ['switch','port','location','source'] | null
      */
-    private function lookupMacsBatch(array $macs)
+    protected function lookupMacsBatch(array $macs)
     {
         // API v0 (docs.librenms.org/API/Ports): GET /ports/mac/{search} — szuka MAC w FDB, zwraca porty
         // posortowane po liczbie MAC na porcie. Przyjmuje format z dwukropkami (00:1a:79:...).
@@ -213,7 +213,7 @@ class IptvLibrenms
      * @param array $urls klucz => URL
      * @return array klucz => zdekodowany JSON (przy błędzie pojedynczego: klucz => ['error' => msg])
      */
-    private function fetchJsonMulti(array $urls)
+    protected function fetchJsonMulti(array $urls)
     {
         if (!function_exists('curl_init') || !function_exists('curl_multi_init')) {
             // Fallback bez multi: sekwencyjnie (wolniej, ale działa).
