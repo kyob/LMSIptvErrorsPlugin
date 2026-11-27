@@ -117,6 +117,16 @@ Uwagi:
 
 Lokalizacja dekodera w widoku `devices` (pierwsze niepuste źródło): LibreNMS (przełącznik + port) → LMS `macs → nodes.netdev → netdevices.location` → adres klienta LMS.
 
+## Test CLI korelacji LibreNMS (bez przeglądarki)
+
+```bash
+sudo -u apache php plugins/LMSIptvErrorsPlugin/bin/lms-iptv-errors-test-librenms.php -C /etc/lms/lms.ini
+# pojedynczy MAC:  --mac=00:1a:79:5b:d1:1d
+# wszystkie MAC-i z events.json:  --all
+```
+
+Bierze MAC-i dekoderów z błędami (`storage/iptv-errors/events.json`) i wypisuje `switch | port | lokalizacja` per MAC. Exit 0 gdy choć jeden MAC ma lokalizację, 2 gdy wszystkie `null`, 1 gdy LibreNMS wyłączone (`librenms_enabled`). Wynik na test-lms26: 25/25 w 0.5 s.
+
 ## Pliki robocze
 
 Katalog `storage/iptv-errors/` tworzy plugin, zapisuje użytkownik WWW, prawa 0600. Pliki zawierają dane klientów.
