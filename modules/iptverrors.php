@@ -640,32 +640,38 @@ if ($data !== null) {
         if ($lnms->enabled() && $macs_ok_all) {
             $loc_lnms = $lnms->getLocationsForMacs($macs_ok_all, $iptv_force);
         }
-        // Źródło 2: MAC -> węzeł -> netdev (przełącznik i jego lokalizacja/adres + współrzędne GPS do mapy loc_lms).
+        // Źródło 2: MAC -> node (węzeł klienta w LMS). Node ma własny adres (address_id -> addresses),
+        // współrzędne GPS (longitude/latitude), klienta (ownerid) i przełącznik+port (netdev, port).
+        // NIE wymagamy netdev — sam node wystarczy do lokalizacji (adres/GPS węzła).
         // SEC: bind IN ?, zero konkatenacji danych z zewnątrz do SQL.
         $loc_switch = array();
         $sw_by_mac = array();
         if ($macs_ok_all) {
-            foreach ($DB->GetAll("SELECT lower(x.mac) AS mac, nd.name AS sw_name,
+            foreach ($DB->GetAll("SELECT lower(x.mac) AS mac, n.name AS node_name, n.port,
+                    nd.name AS sw_name,
                     a.name AS addr_name, a.city, a.street, a.house, a.flat, a.zip,
-                    nd.longitude, nd.latitude
-                FROM macs x JOIN nodes n ON n.id = x.nodeid JOIN netdevices nd ON nd.id = n.netdev
-                LEFT JOIN addresses a ON a.id = nd.address_id
+                    n.longitude, n.latitude
+                FROM macs x JOIN nodes n ON n.id = x.nodeid
+                LEFT JOIN netdevices nd ON nd.id = n.netdev
+                LEFT JOIN addresses a ON a.id = n.address_id
                 WHERE lower(x.mac) IN ?", array($macs_ok_all)) ?: array() as $r) {
-                // Schemat LMS (doc/lms.pgsql): netdevices nie ma kolumn adresowych — adres jest w tabeli
-                // addresses (FK netdevices.address_id); współrzędne bezpośrednio w netdevices.
-                // Lokalizacja = nazwa adresu (fallback: nazwa switcha) + miasto + ulica + kod (puste pomijamy).
-                $base = trim((string) ($r['addr_name'] !== '' ? $r['addr_name'] : $r['sw_name']));
+                // Lokalizacja = adres węzła (fallback: nazwa węzła) + miasto + ulica + kod (puste pomijamy).
+                $base = trim((string) ($r['addr_name'] !== '' ? $r['addr_name'] : $r['node_name']));
                 $street = trim((string) $r['street'] . ' ' . (string) $r['house']
                     . ($r['flat'] !== null && (string) $r['flat'] !== '' ? '/' . (string) $r['flat'] : ''));
                 $parts = array_filter(array($base, trim((string) $r['city']), $street, trim((string) $r['zip'])), function ($p) {
                     return $p !== '';
                 });
                 $loc_switch[$r['mac']] = $parts ? implode(', ', $parts) : '';
-                // Współrzędne GPS przełącznika: puste/null w LMS = brak — wtedy null (bez punktu na mapie).
+                // Współrzędne GPS węzła: puste/null w LMS = brak — wtedy null (bez punktu na mapie).
                 $sw_lat = $r['longitude'];
                 $sw_lng = $r['latitude'];
+                $sw_name = (string) $r['sw_name'];
+                if ($sw_name !== '' && (int) $r['port'] > 0) {
+                    $sw_name .= ' port ' . (int) $r['port'];
+                }
                 $sw_by_mac[$r['mac']] = array(
-                    'switch' => (string) $r['sw_name'],
+                    'switch' => $sw_name !== '' ? $sw_name : (string) $r['node_name'],
                     'address' => $loc_switch[$r['mac']],
                     'lat' => ($sw_lat !== null && $sw_lat !== '' && is_numeric($sw_lat)) ? (float) $sw_lat : null,
                     'lng' => ($sw_lng !== null && $sw_lng !== '' && is_numeric($sw_lng)) ? (float) $sw_lng : null,
